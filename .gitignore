@@ -1,6 +1,6 @@
 # Binaries
 bin/
-pennyclaw
+/pennyclaw
 *.exe
 
 # Config with secrets
