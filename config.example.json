@@ -1,0 +1,38 @@
+{
+  "server": {
+    "host": "0.0.0.0",
+    "port": 3000
+  },
+  "llm": {
+    "provider": "openai",
+    "model": "gpt-4.1-mini",
+    "api_key": "$OPENAI_API_KEY",
+    "max_tokens": 4096,
+    "temperature": 0.7
+  },
+  "channels": {
+    "web": {
+      "enabled": true
+    },
+    "telegram": {
+      "enabled": false,
+      "token": "$TELEGRAM_BOT_TOKEN"
+    },
+    "discord": {
+      "enabled": false,
+      "token": "$DISCORD_BOT_TOKEN"
+    }
+  },
+  "memory": {
+    "db_path": "data/pennyclaw.db",
+    "max_history": 50,
+    "persist_sessions": true
+  },
+  "sandbox": {
+    "enabled": true,
+    "work_dir": "/tmp/pennyclaw-sandbox",
+    "max_timeout": 30,
+    "max_memory": 128
+  },
+  "system_prompt": "You are PennyClaw, a helpful personal AI assistant running on a lightweight GCP free-tier server. Be concise, efficient, and helpful. You can execute commands, read/write files, search the web, and make HTTP requests."
+}

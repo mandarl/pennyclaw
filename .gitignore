@@ -1,0 +1,26 @@
+# Binaries
+bin/
+pennyclaw
+*.exe
+
+# Config with secrets
+config.json
+.env
+
+# Database
+*.db
+*.db-journal
+*.db-wal
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Build
+dist/
