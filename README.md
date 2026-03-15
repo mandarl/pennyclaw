@@ -9,19 +9,20 @@
 
 ---
 
-PennyClaw is a lightweight, open-source AI agent built from scratch in Go, designed to run comfortably within the constraints of Google Cloud Platform's **Always Free** `e2-micro` VM (1GB RAM, 2 shared vCPUs, 30GB disk). One click deploys it. Zero dollars keeps it running. Forever.
+PennyClaw is a lightweight, open-source AI agent built from scratch in Go, designed to run comfortably within the constraints of Google Cloud Platform's **Always Free** `e2-micro` VM (1GB RAM, 2 shared vCPUs, 30GB disk). One click deploys it. Zero dollars keeps it running — as long as GCP's free tier exists.
 
 ## Why PennyClaw?
 
-| | OpenClaw | NanoClaw | PennyClaw |
-|---|---|---|---|
-| **RAM Usage** | 2-4 GB | 200-500 MB | **< 50 MB idle** |
-| **Monthly Cost** | $5-20/mo VPS | $5-20/mo VPS | **$0/mo** |
-| **Deployment** | Complex setup | Docker required | **One click** |
-| **Language** | TypeScript | TypeScript | **Go** |
-| **Codebase** | 500k+ lines | ~500 lines | **~2,000 lines** |
+Most self-hosted AI agents assume you have a beefy VPS. PennyClaw is purpose-built for the smallest free VM you can get:
 
-> *"I was tired of paying for servers I barely use. GCP gives everyone a free VM forever. So I built PennyClaw."*
+| | Typical self-hosted agent | PennyClaw |
+|---|---|---|
+| **RAM Usage** | 500 MB - 4 GB | **< 50 MB idle** |
+| **Monthly Cost** | $5-20/mo VPS | **$0/mo** (GCP free tier) |
+| **Deployment** | Docker + config | **One click** |
+| **Language** | Python/TypeScript | **Go** (single binary) |
+
+> *"I was tired of paying for servers I barely use. GCP gives everyone a free VM — so I built an agent that fits inside it."*
 
 ## Demo
 
@@ -182,21 +183,25 @@ PennyClaw works with any OpenAI-compatible API. To use OpenRouter:
 
 ## Security
 
-PennyClaw includes multiple layers of security:
+PennyClaw includes multiple layers of security, but **it is not a hardened production system**. Use it for personal automation, not for handling sensitive data.
 
-- **Authentication:** Set `PENNYCLAW_AUTH_TOKEN` env var to require a token for web UI access
-- **Login screen:** The web UI shows a login prompt when auth is enabled, stores the token in localStorage, and sends it as a `Bearer` token with every request
+- **Secure-by-default auth:** If no `PENNYCLAW_AUTH_TOKEN` is set, PennyClaw auto-generates one on startup and prints it to the log. Use `--insecure` to explicitly opt out.
+- **Login screen:** The web UI shows a login prompt, stores the token in localStorage, and sends it as a `Bearer` token with every request
 - **Rate limiting:** 20 requests per minute per IP on the chat endpoint
-- **Sandbox isolation:** Tool execution runs in a restricted environment
+- **Path traversal protection:** File read/write skills are restricted to the sandbox directory
+- **SSRF protection:** HTTP request skill blocks internal IPs, loopback, and cloud metadata endpoints
+- **Sandbox isolation:** Tool execution runs in a restricted environment with namespace isolation (when running as root)
 - **systemd hardening:** `ProtectSystem=strict`, `NoNewPrivileges=true`, memory limits
 
 ```bash
-# Set auth token (strongly recommended)
-export PENNYCLAW_AUTH_TOKEN=$(openssl rand -hex 24)
-echo "Your token: $PENNYCLAW_AUTH_TOKEN"
+# Set a custom auth token
+export PENNYCLAW_AUTH_TOKEN=$(openssl rand -hex 32)
+
+# Or let PennyClaw generate one automatically (check the startup log)
+./pennyclaw --config config.json
 ```
 
-Without `PENNYCLAW_AUTH_TOKEN`, the web UI is open to anyone who discovers your IP.
+> **Known limitations:** The `run_command` skill executes arbitrary shell commands within the sandbox. While sandboxed, this is inherently powerful. The sandbox provides defense-in-depth but is not a security boundary against a determined attacker. Do not expose PennyClaw to untrusted users.
 
 ### Accessing the Web UI Securely
 
@@ -304,6 +309,17 @@ make teardown
 ```
 
 This deletes the VM and firewall rules. No further charges.
+
+## Limitations
+
+PennyClaw is a weekend project that solves a specific problem (free self-hosted AI agent). It is **not** a replacement for production agent frameworks:
+
+- **Not a true agent:** PennyClaw uses a simple tool-calling loop, not multi-step planning, reflection, or chain-of-thought reasoning. It's closer to a "chatbot with tools" than an autonomous agent.
+- **Single-user:** Designed for personal use. No multi-tenant support, no user management.
+- **GCP free tier constraints:** The e2-micro VM is slow. Expect 2-5 second response times. CPU-intensive tasks may hit the shared vCPU limit.
+- **No streaming:** Responses are returned all at once, not streamed token-by-token.
+- **Basic sandboxing:** The sandbox provides isolation but is not a security boundary. Do not expose to untrusted users.
+- **GCP free tier may change:** Google could modify or discontinue the Always Free tier at any time. PennyClaw has no control over this.
 
 ## Contributing
 
