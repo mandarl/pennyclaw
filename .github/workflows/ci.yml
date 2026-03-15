@@ -18,13 +18,20 @@ jobs:
         with:
           go-version: '1.22'
 
+      - name: Install SQLite dev headers
+        run: sudo apt-get update && sudo apt-get install -y libsqlite3-dev
+
       - name: Download dependencies
         run: go mod download
 
       - name: Build
+        env:
+          CGO_ENABLED: 1
         run: go build -v ./...
 
       - name: Run tests
+        env:
+          CGO_ENABLED: 1
         run: go test -v -race -coverprofile=coverage.out ./...
 
       - name: Upload coverage
