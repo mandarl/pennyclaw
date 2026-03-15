@@ -3,6 +3,7 @@
 **Your $0/month personal AI agent, running 24/7 on GCP's free tier.**
 
 [![Deploy to GCP](https://gstatic.com/cloudssh/images/open-btn.svg)](https://shell.cloud.google.com/cloudshell/editor?cloudshell_git_repo=https://github.com/mandarl/pennyclaw.git&cloudshell_tutorial=docs/deploy-tutorial.md&cloudshell_workspace=.)
+[![CI](https://github.com/mandarl/pennyclaw/actions/workflows/ci.yml/badge.svg)](https://github.com/mandarl/pennyclaw/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![Go Version](https://img.shields.io/badge/Go-1.22+-00ADD8?logo=go)](https://go.dev)
 
@@ -21,6 +22,12 @@ PennyClaw is a lightweight, open-source AI agent built from scratch in Go, desig
 | **Codebase** | 500k+ lines | ~500 lines | **~2,000 lines** |
 
 > *"I was tired of paying for servers I barely use. GCP gives everyone a free VM forever. So I built PennyClaw."*
+
+## Demo
+
+<p align="center">
+  <img src="https://d2xsxph8kpxj0f.cloudfront.net/310519663317149291/VWpALcgzAw8ss345SKvWHs/demo_7bac11e6.svg" alt="PennyClaw deploy demo" width="720">
+</p>
 
 ## Quick Start
 
