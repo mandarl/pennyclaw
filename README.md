@@ -26,8 +26,12 @@ PennyClaw is a lightweight, open-source AI agent built from scratch in Go, desig
 ## Demo
 
 <p align="center">
-  <img src="docs/assets/demo.svg" alt="PennyClaw deploy demo" width="720">
+  <a href="https://asciinema.org/a/NxRCnJEaj904vVvr" target="_blank">
+    <img src="https://asciinema.org/a/NxRCnJEaj904vVvr.svg" alt="PennyClaw deploy demo" width="720">
+  </a>
 </p>
+
+> Click the image above to watch the animated deploy demo on asciinema.org
 
 ## Quick Start
 
