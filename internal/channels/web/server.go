@@ -8,6 +8,9 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"os"
+	"strings"
+	"sync"
 	"time"
 )
 
@@ -16,18 +19,70 @@ type MessageHandler func(ctx context.Context, sessionID, message, channel string
 
 // Server is the web UI HTTP server.
 type Server struct {
-	host    string
-	port    int
-	handler MessageHandler
-	srv     *http.Server
+	host      string
+	port      int
+	handler   MessageHandler
+	srv       *http.Server
+	authToken string
+	limiter   *rateLimiter
+}
+
+// rateLimiter implements a simple per-IP token bucket rate limiter.
+type rateLimiter struct {
+	mu       sync.Mutex
+	clients  map[string]*clientBucket
+	rate     int           // requests per window
+	window   time.Duration
+}
+
+type clientBucket struct {
+	tokens    int
+	lastReset time.Time
+}
+
+func newRateLimiter(rate int, window time.Duration) *rateLimiter {
+	return &rateLimiter{
+		clients: make(map[string]*clientBucket),
+		rate:    rate,
+		window:  window,
+	}
+}
+
+func (rl *rateLimiter) allow(ip string) bool {
+	rl.mu.Lock()
+	defer rl.mu.Unlock()
+
+	now := time.Now()
+	client, ok := rl.clients[ip]
+	if !ok || now.Sub(client.lastReset) > rl.window {
+		rl.clients[ip] = &clientBucket{tokens: rl.rate - 1, lastReset: now}
+		return true
+	}
+	if client.tokens > 0 {
+		client.tokens--
+		return true
+	}
+	return false
 }
 
 // NewServer creates a new web UI server.
+// If PENNYCLAW_AUTH_TOKEN is set, requests to /api/chat require
+// the token as a Bearer token or ?token= query parameter.
 func NewServer(host string, port int, handler MessageHandler) *Server {
+	token := os.Getenv("PENNYCLAW_AUTH_TOKEN")
+	if token == "" {
+		log.Printf("WARNING: PENNYCLAW_AUTH_TOKEN not set — web UI is open to anyone!")
+		log.Printf("Set PENNYCLAW_AUTH_TOKEN to require authentication.")
+	} else {
+		log.Printf("Web UI authentication enabled (token required)")
+	}
+
 	return &Server{
-		host:    host,
-		port:    port,
-		handler: handler,
+		host:      host,
+		port:      port,
+		handler:   handler,
+		authToken: token,
+		limiter:   newRateLimiter(20, time.Minute), // 20 requests per minute per IP
 	}
 }
 
@@ -79,6 +134,30 @@ func (s *Server) handleChat(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 		return
+	}
+
+	// Rate limiting
+	clientIP := r.RemoteAddr
+	if fwd := r.Header.Get("X-Forwarded-For"); fwd != "" {
+		clientIP = strings.Split(fwd, ",")[0]
+	}
+	if !s.limiter.allow(strings.TrimSpace(clientIP)) {
+		http.Error(w, "Rate limit exceeded. Try again in a minute.", http.StatusTooManyRequests)
+		return
+	}
+
+	// Authentication check
+	if s.authToken != "" {
+		token := ""
+		if auth := r.Header.Get("Authorization"); strings.HasPrefix(auth, "Bearer ") {
+			token = strings.TrimPrefix(auth, "Bearer ")
+		} else {
+			token = r.URL.Query().Get("token")
+		}
+		if token != s.authToken {
+			http.Error(w, "Unauthorized", http.StatusUnauthorized)
+			return
+		}
 	}
 
 	var req chatRequest

@@ -47,9 +47,21 @@ export OPENAI_API_KEY="your-key-here"
 export ANTHROPIC_API_KEY="your-key-here"
 ```
 
+**OpenRouter (access 100+ models with one key):**
+```bash
+export OPENROUTER_API_KEY="your-key-here"
+```
+
 You can get an API key from:
 - OpenAI: https://platform.openai.com/api-keys
 - Anthropic: https://console.anthropic.com/
+- OpenRouter: https://openrouter.ai/keys
+
+**Optional: Set an auth token** to protect your web UI:
+```bash
+export PENNYCLAW_AUTH_TOKEN="your-secret-token"
+```
+If not set, the web UI will be open to anyone who discovers the IP.
 
 ## Deploy
 

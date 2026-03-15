@@ -376,11 +376,11 @@ mkdir -p /opt/pennyclaw/data
 cd /opt/pennyclaw
 
 # Download from GitHub releases (placeholder URL)
-curl -fsSL "https://github.com/pennyclaw/pennyclaw/releases/download/v${PENNYCLAW_VERSION}/pennyclaw-linux-amd64" \
+curl -fsSL "https://github.com/mandarl/pennyclaw/releases/download/v${PENNYCLAW_VERSION}/pennyclaw-linux-amd64" \
     -o pennyclaw || {
     echo "Download failed. Building from source..."
     apt-get install -y -qq golang-go gcc
-    git clone https://github.com/pennyclaw/pennyclaw.git /tmp/pennyclaw-src
+    git clone https://github.com/mandarl/pennyclaw.git /tmp/pennyclaw-src
     cd /tmp/pennyclaw-src
     CGO_ENABLED=1 go build -ldflags="-s -w" -o /opt/pennyclaw/pennyclaw ./cmd/pennyclaw
     cd /opt/pennyclaw
@@ -454,9 +454,26 @@ echo "=== PennyClaw Setup Complete: $(date) ==="
 STARTUP
 )
 
-info "Creating instance: ${INSTANCE_NAME}..."
-
-gcloud compute instances create "$INSTANCE_NAME" \
+# Handle upgrade mode: stop existing service, redeploy binary
+if [[ "${UPGRADE_MODE:-false}" == "true" ]]; then
+    info "Upgrading existing instance: ${EXISTING_PC}..."
+    gcloud compute ssh "$EXISTING_PC" \
+        --zone="$BEST_ZONE" \
+        --project="$PROJECT" \
+        --command="sudo systemctl stop pennyclaw 2>/dev/null; echo 'Service stopped'" || true
+    INSTANCE_NAME="$EXISTING_PC"
+    # Re-run startup script on existing instance
+    gcloud compute instances add-metadata "$INSTANCE_NAME" \
+        --zone="$BEST_ZONE" \
+        --project="$PROJECT" \
+        --metadata=startup-script="$STARTUP_SCRIPT" 2>/dev/null
+    gcloud compute instances reset "$INSTANCE_NAME" \
+        --zone="$BEST_ZONE" \
+        --project="$PROJECT"
+    ok "Instance reset with updated PennyClaw"
+else
+    info "Creating instance: ${INSTANCE_NAME}..."
+    gcloud compute instances create "$INSTANCE_NAME" \
     --project="$PROJECT" \
     --zone="$BEST_ZONE" \
     --machine-type="$MACHINE_TYPE" \
@@ -471,6 +488,7 @@ gcloud compute instances create "$INSTANCE_NAME" \
     --no-restart-on-failure
 
 ok "Instance created: ${INSTANCE_NAME}"
+fi
 
 # Create firewall rule for web UI
 info "Configuring firewall..."

@@ -1,4 +1,4 @@
-module github.com/pennyclaw/pennyclaw
+module github.com/mandarl/pennyclaw
 
 go 1.22
 

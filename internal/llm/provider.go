@@ -10,7 +10,7 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/pennyclaw/pennyclaw/internal/config"
+	"github.com/mandarl/pennyclaw/internal/config"
 )
 
 // Message represents a chat message.

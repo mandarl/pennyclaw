@@ -2,7 +2,7 @@
 
 **Your $0/month personal AI agent, running 24/7 on GCP's free tier.**
 
-[![Deploy to GCP](https://gstatic.com/cloudssh/images/open-btn.svg)](https://shell.cloud.google.com/cloudshell/editor?cloudshell_git_repo=https://github.com/pennyclaw/pennyclaw.git&cloudshell_tutorial=docs/deploy-tutorial.md&cloudshell_workspace=.)
+[![Deploy to GCP](https://gstatic.com/cloudssh/images/open-btn.svg)](https://shell.cloud.google.com/cloudshell/editor?cloudshell_git_repo=https://github.com/mandarl/pennyclaw.git&cloudshell_tutorial=docs/deploy-tutorial.md&cloudshell_workspace=.)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![Go Version](https://img.shields.io/badge/Go-1.22+-00ADD8?logo=go)](https://go.dev)
 
@@ -28,7 +28,7 @@ PennyClaw is a lightweight, open-source AI agent built from scratch in Go, desig
 
 Click the button below to deploy PennyClaw to your own GCP free-tier VM in under 5 minutes:
 
-[![Open in Cloud Shell](https://gstatic.com/cloudssh/images/open-btn.svg)](https://shell.cloud.google.com/cloudshell/editor?cloudshell_git_repo=https://github.com/pennyclaw/pennyclaw.git&cloudshell_tutorial=docs/deploy-tutorial.md&cloudshell_workspace=.)
+[![Open in Cloud Shell](https://gstatic.com/cloudssh/images/open-btn.svg)](https://shell.cloud.google.com/cloudshell/editor?cloudshell_git_repo=https://github.com/mandarl/pennyclaw.git&cloudshell_tutorial=docs/deploy-tutorial.md&cloudshell_workspace=.)
 
 The deployment script includes **24 pre-flight checks** to ensure you stay within the free tier:
 
@@ -43,7 +43,7 @@ The deployment script includes **24 pre-flight checks** to ensure you stay withi
 ### Option 2: Run Locally
 
 ```bash
-git clone https://github.com/pennyclaw/pennyclaw.git
+git clone https://github.com/mandarl/pennyclaw.git
 cd pennyclaw
 cp config.example.json config.json
 
@@ -59,15 +59,18 @@ Open http://localhost:3000 in your browser.
 ### Option 3: Docker
 
 ```bash
+git clone https://github.com/mandarl/pennyclaw.git
+cd pennyclaw
+docker build -t pennyclaw .
 docker run -p 3000:3000 \
   -e OPENAI_API_KEY="sk-your-key-here" \
-  ghcr.io/pennyclaw/pennyclaw:latest
+  pennyclaw
 ```
 
 ## Features
 
 ### Core
-- **Multi-provider LLM gateway** — OpenAI, Anthropic, Google Gemini, and any OpenAI-compatible API
+- **Multi-provider LLM gateway** — OpenAI, Anthropic, Google Gemini, OpenRouter, and any OpenAI-compatible API
 - **Persistent memory** — SQLite-backed conversation history that survives restarts
 - **Tool execution** — Sandboxed shell commands, file I/O, web search, HTTP requests
 - **Web chat UI** — Clean, embedded interface with zero external dependencies
@@ -151,6 +154,37 @@ PennyClaw uses a single `config.json` file:
 ```
 
 Environment variables prefixed with `$` are automatically resolved.
+
+### OpenRouter / Custom Providers
+
+PennyClaw works with any OpenAI-compatible API. To use OpenRouter:
+
+```json
+{
+  "llm": {
+    "provider": "openai",
+    "model": "anthropic/claude-sonnet-4-20250514",
+    "api_key": "$OPENROUTER_API_KEY",
+    "base_url": "https://openrouter.ai/api/v1"
+  }
+}
+```
+
+## Security
+
+PennyClaw includes basic security features:
+
+- **Authentication:** Set `PENNYCLAW_AUTH_TOKEN` env var to require a token for web UI access
+- **Rate limiting:** 20 requests per minute per IP on the chat endpoint
+- **Sandbox isolation:** Tool execution runs in a restricted environment
+- **systemd hardening:** `ProtectSystem=strict`, `NoNewPrivileges=true`, memory limits
+
+```bash
+# Set auth token (strongly recommended for public-facing deployments)
+export PENNYCLAW_AUTH_TOKEN="your-secret-token-here"
+```
+
+Without `PENNYCLAW_AUTH_TOKEN`, the web UI is open to anyone who discovers your IP.
 
 ## Built-in Skills
 

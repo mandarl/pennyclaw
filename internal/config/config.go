@@ -126,7 +126,7 @@ func DefaultConfig() *Config {
 			Web: WebChannelConfig{Enabled: true},
 		},
 		Memory: MemoryConfig{
-			DBPath:         "pennyclaw.db",
+			DBPath:         "data/pennyclaw.db",
 			MaxHistory:     50,
 			PersistSessions: true,
 		},

@@ -3,13 +3,19 @@
 package skills
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
+	"net/http"
+	"net/url"
+	"strings"
 	"sync"
+	"time"
 
-	"github.com/pennyclaw/pennyclaw/internal/llm"
-	"github.com/pennyclaw/pennyclaw/internal/sandbox"
+	"github.com/mandarl/pennyclaw/internal/llm"
+	"github.com/mandarl/pennyclaw/internal/sandbox"
 )
 
 // Skill defines a capability that the agent can use.
@@ -28,6 +34,7 @@ type Registry struct {
 	mu     sync.RWMutex
 	skills map[string]*Skill
 	sb     *sandbox.Sandbox
+	client *http.Client
 }
 
 // NewRegistry creates a new skill registry with built-in skills.
@@ -35,6 +42,9 @@ func NewRegistry(sb *sandbox.Sandbox) *Registry {
 	r := &Registry{
 		skills: make(map[string]*Skill),
 		sb:     sb,
+		client: &http.Client{
+			Timeout: 30 * time.Second,
+		},
 	}
 
 	// Register built-in skills
@@ -178,10 +188,10 @@ func (r *Registry) registerBuiltins() {
 		},
 	})
 
-	// Web search skill (via HTTP)
+	// Web search skill — uses Go net/http (no shell injection risk)
 	r.Register(&Skill{
 		Name:        "web_search",
-		Description: "Search the web for information. Returns search results as text.",
+		Description: "Search the web for information using DuckDuckGo. Returns search results as text.",
 		Parameters: json.RawMessage(`{
 			"type": "object",
 			"properties": {
@@ -199,17 +209,38 @@ func (r *Registry) registerBuiltins() {
 			if err := json.Unmarshal(args, &params); err != nil {
 				return "", err
 			}
-			// Uses a simple curl-based search via DuckDuckGo lite
-			cmd := fmt.Sprintf(`curl -s "https://lite.duckduckgo.com/lite/?q=%s" | sed 's/<[^>]*>//g' | head -100`, params.Query)
-			result, err := r.sb.ExecuteShell(ctx, cmd)
+
+			// Safely URL-encode the query parameter
+			searchURL := "https://lite.duckduckgo.com/lite/?q=" + url.QueryEscape(params.Query)
+
+			req, err := http.NewRequestWithContext(ctx, "GET", searchURL, nil)
 			if err != nil {
-				return "", err
+				return "", fmt.Errorf("creating search request: %w", err)
 			}
-			return result.Stdout, nil
+			req.Header.Set("User-Agent", "PennyClaw/0.1.0")
+
+			resp, err := r.client.Do(req)
+			if err != nil {
+				return "", fmt.Errorf("executing search: %w", err)
+			}
+			defer resp.Body.Close()
+
+			body, err := io.ReadAll(io.LimitReader(resp.Body, 64*1024)) // Limit to 64KB
+			if err != nil {
+				return "", fmt.Errorf("reading search results: %w", err)
+			}
+
+			// Strip HTML tags (simple approach)
+			text := stripHTMLTags(string(body))
+			// Truncate to reasonable length
+			if len(text) > 4000 {
+				text = text[:4000] + "\n... [truncated]"
+			}
+			return text, nil
 		},
 	})
 
-	// HTTP request skill
+	// HTTP request skill — uses Go net/http (no shell injection risk)
 	r.Register(&Skill{
 		Name:        "http_request",
 		Description: "Make an HTTP request to a URL. Useful for API calls and fetching web content.",
@@ -228,31 +259,96 @@ func (r *Registry) registerBuiltins() {
 				"body": {
 					"type": "string",
 					"description": "Request body (for POST/PUT)"
+				},
+				"headers": {
+					"type": "object",
+					"description": "Optional HTTP headers as key-value pairs"
 				}
 			},
 			"required": ["url"]
 		}`),
 		Handler: func(ctx context.Context, args json.RawMessage) (string, error) {
 			var params struct {
-				URL    string `json:"url"`
-				Method string `json:"method"`
-				Body   string `json:"body"`
+				URL     string            `json:"url"`
+				Method  string            `json:"method"`
+				Body    string            `json:"body"`
+				Headers map[string]string `json:"headers"`
 			}
 			if err := json.Unmarshal(args, &params); err != nil {
 				return "", err
 			}
+
 			if params.Method == "" {
 				params.Method = "GET"
 			}
-			cmd := fmt.Sprintf(`curl -s -X %s "%s"`, params.Method, params.URL)
-			if params.Body != "" {
-				cmd += fmt.Sprintf(` -d '%s' -H "Content-Type: application/json"`, params.Body)
+
+			// Validate method
+			params.Method = strings.ToUpper(params.Method)
+			validMethods := map[string]bool{"GET": true, "POST": true, "PUT": true, "DELETE": true, "PATCH": true, "HEAD": true}
+			if !validMethods[params.Method] {
+				return "", fmt.Errorf("unsupported HTTP method: %s", params.Method)
 			}
-			result, err := r.sb.ExecuteShell(ctx, cmd)
+
+			// Validate URL
+			parsedURL, err := url.Parse(params.URL)
 			if err != nil {
-				return "", err
+				return "", fmt.Errorf("invalid URL: %w", err)
 			}
-			return result.Stdout, nil
+			if parsedURL.Scheme != "http" && parsedURL.Scheme != "https" {
+				return "", fmt.Errorf("only http and https URLs are supported")
+			}
+
+			var bodyReader io.Reader
+			if params.Body != "" {
+				bodyReader = bytes.NewBufferString(params.Body)
+			}
+
+			req, err := http.NewRequestWithContext(ctx, params.Method, params.URL, bodyReader)
+			if err != nil {
+				return "", fmt.Errorf("creating request: %w", err)
+			}
+
+			req.Header.Set("User-Agent", "PennyClaw/0.1.0")
+			if params.Body != "" {
+				req.Header.Set("Content-Type", "application/json")
+			}
+			for k, v := range params.Headers {
+				req.Header.Set(k, v)
+			}
+
+			resp, err := r.client.Do(req)
+			if err != nil {
+				return "", fmt.Errorf("executing request: %w", err)
+			}
+			defer resp.Body.Close()
+
+			body, err := io.ReadAll(io.LimitReader(resp.Body, 64*1024)) // Limit to 64KB
+			if err != nil {
+				return "", fmt.Errorf("reading response: %w", err)
+			}
+
+			result := fmt.Sprintf("Status: %d %s\n\n%s", resp.StatusCode, resp.Status, string(body))
+			if len(result) > 4000 {
+				result = result[:4000] + "\n... [truncated]"
+			}
+			return result, nil
 		},
 	})
+}
+
+// stripHTMLTags removes HTML tags from a string (simple regex-free approach).
+func stripHTMLTags(s string) string {
+	var result strings.Builder
+	inTag := false
+	for _, r := range s {
+		switch {
+		case r == '<':
+			inTag = true
+		case r == '>':
+			inTag = false
+		case !inTag:
+			result.WriteRune(r)
+		}
+	}
+	return result.String()
 }

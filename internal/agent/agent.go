@@ -10,12 +10,12 @@ import (
 	"log"
 	"time"
 
-	"github.com/pennyclaw/pennyclaw/internal/config"
-	"github.com/pennyclaw/pennyclaw/internal/llm"
-	"github.com/pennyclaw/pennyclaw/internal/memory"
-	"github.com/pennyclaw/pennyclaw/internal/sandbox"
-	"github.com/pennyclaw/pennyclaw/internal/skills"
-	"github.com/pennyclaw/pennyclaw/internal/channels/web"
+	"github.com/mandarl/pennyclaw/internal/config"
+	"github.com/mandarl/pennyclaw/internal/llm"
+	"github.com/mandarl/pennyclaw/internal/memory"
+	"github.com/mandarl/pennyclaw/internal/sandbox"
+	"github.com/mandarl/pennyclaw/internal/skills"
+	"github.com/mandarl/pennyclaw/internal/channels/web"
 )
 
 // Agent is the core PennyClaw agent.
@@ -26,6 +26,10 @@ type Agent struct {
 	sandbox  *sandbox.Sandbox
 	skills   *skills.Registry
 	webUI    *web.Server
+
+	// supportsTools indicates whether the LLM provider supports tool/function calling.
+	// Anthropic and Gemini providers currently operate in text-only mode.
+	supportsTools bool
 }
 
 // New creates a new agent instance.
@@ -54,17 +58,31 @@ func New(cfg *config.Config) (*Agent, error) {
 	if err != nil {
 		return nil, fmt.Errorf("initializing sandbox: %w", err)
 	}
+	if sb.IsRootIsolation() {
+		log.Printf("Sandbox: full namespace isolation (running as root)")
+	} else {
+		log.Printf("Sandbox: restricted environment mode (non-root)")
+	}
 
 	// Initialize skills registry
 	skillRegistry := skills.NewRegistry(sb)
 	log.Printf("Loaded %d skills", len(skillRegistry.AsTools()))
 
+	// Determine tool support based on provider
+	// Currently only OpenAI-compatible providers support function calling properly.
+	// Anthropic and Gemini providers work in text-only mode.
+	supportsTools := provider.Name() == "openai"
+	if !supportsTools {
+		log.Printf("Note: %s provider runs in text-only mode (no tool calling). For full agent capabilities, use an OpenAI-compatible provider.", provider.Name())
+	}
+
 	return &Agent{
-		cfg:      cfg,
-		provider: provider,
-		memory:   mem,
-		sandbox:  sb,
-		skills:   skillRegistry,
+		cfg:           cfg,
+		provider:      provider,
+		memory:        mem,
+		sandbox:       sb,
+		skills:        skillRegistry,
+		supportsTools: supportsTools,
 	}, nil
 }
 
@@ -124,10 +142,16 @@ func (a *Agent) handleMessage(ctx context.Context, sessionID, userMessage, chann
 		})
 	}
 
+	// Determine which tools to pass based on provider support
+	var tools []llm.Tool
+	if a.supportsTools {
+		tools = a.skills.AsTools()
+	}
+
 	// Agent loop: call LLM, execute tools, repeat until we get a text response
 	maxIterations := 10
 	for i := 0; i < maxIterations; i++ {
-		resp, err := a.provider.Chat(ctx, messages, a.skills.AsTools())
+		resp, err := a.provider.Chat(ctx, messages, tools)
 		if err != nil {
 			return "", fmt.Errorf("LLM call failed: %w", err)
 		}
@@ -141,23 +165,45 @@ func (a *Agent) handleMessage(ctx context.Context, sessionID, userMessage, chann
 			return resp.Content, nil
 		}
 
-		// Execute tool calls
+		// Execute tool calls and build proper message sequence.
+		// Per OpenAI spec:
+		// 1. Add assistant message (with tool_calls metadata serialized in content)
+		// 2. Add tool result messages with role "tool" and matching tool_call_id
+		//
+		// Note: Since our Message struct uses simple string Content, we serialize
+		// tool call info into the content field. The LLM provider layer handles
+		// the proper API formatting.
+
+		// Build assistant message content that includes tool call references
+		assistantContent := resp.Content
+		if assistantContent == "" {
+			// When the LLM only returns tool calls with no text, create a summary
+			callNames := make([]string, len(resp.ToolCalls))
+			for j, tc := range resp.ToolCalls {
+				callNames[j] = tc.Name
+			}
+			assistantContent = fmt.Sprintf("[Calling tools: %s]", joinStrings(callNames, ", "))
+		}
+
 		messages = append(messages, llm.Message{
 			Role:    "assistant",
-			Content: resp.Content,
+			Content: assistantContent,
 		})
 
 		for _, tc := range resp.ToolCalls {
-			log.Printf("Executing skill: %s", tc.Name)
+			log.Printf("Executing skill: %s (call_id: %s)", tc.Name, tc.ID)
 			result, err := a.skills.Execute(ctx, tc.Name, tc.Arguments)
 			if err != nil {
-				result = fmt.Sprintf("Error: %v", err)
+				result = fmt.Sprintf("Error executing %s: %v", tc.Name, err)
 			}
 
-			// Add tool result to context
+			// Add tool result as a properly formatted message.
+			// We use role "user" with a structured prefix because our simple
+			// Message type doesn't have a dedicated tool_call_id field.
+			// The LLM can still understand the context from the structured format.
 			messages = append(messages, llm.Message{
 				Role:    "user",
-				Content: fmt.Sprintf("[Tool result for %s]: %s", tc.Name, truncate(result, 4000)),
+				Content: fmt.Sprintf("[Tool result for %s (call_id: %s)]:\n%s", tc.Name, tc.ID, truncate(result, 4000)),
 			})
 		}
 	}
@@ -173,12 +219,13 @@ func (a *Agent) HandleMessage(ctx context.Context, sessionID, message, channel s
 // HealthCheck returns the agent's health status.
 func (a *Agent) HealthCheck() map[string]interface{} {
 	return map[string]interface{}{
-		"status":   "ok",
-		"version":  "0.1.0",
-		"provider": a.provider.Name(),
-		"model":    a.cfg.LLM.Model,
-		"skills":   len(a.skills.AsTools()),
-		"uptime":   time.Now().Format(time.RFC3339),
+		"status":        "ok",
+		"version":       "0.1.0",
+		"provider":      a.provider.Name(),
+		"model":         a.cfg.LLM.Model,
+		"skills":        len(a.skills.AsTools()),
+		"tools_enabled": a.supportsTools,
+		"uptime":        time.Now().Format(time.RFC3339),
 	}
 }
 
@@ -193,4 +240,15 @@ func truncate(s string, maxLen int) string {
 		return s
 	}
 	return s[:maxLen] + "... [truncated]"
+}
+
+func joinStrings(ss []string, sep string) string {
+	result := ""
+	for i, s := range ss {
+		if i > 0 {
+			result += sep
+		}
+		result += s
+	}
+	return result
 }

@@ -6,7 +6,7 @@ COMMIT  ?= $(shell git rev-parse --short HEAD 2>/dev/null || echo "dev")
 DATE    ?= $(shell date -u +%Y-%m-%dT%H:%M:%SZ)
 LDFLAGS  = -s -w -X main.version=$(VERSION) -X main.commit=$(COMMIT) -X main.buildDate=$(DATE)
 
-.PHONY: build run clean test docker deploy
+.PHONY: build run clean test docker deploy logs
 
 ## build: Compile the PennyClaw binary
 build:
@@ -46,6 +46,10 @@ teardown:
 ## preflight: Run pre-flight checks only (no deployment)
 preflight:
 	@bash scripts/deploy.sh --preflight-only
+
+## logs: View PennyClaw service logs (on GCP VM)
+logs:
+	@journalctl -u pennyclaw -f --no-pager
 
 ## help: Show this help
 help:
