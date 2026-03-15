@@ -383,14 +383,18 @@ func (p *geminiProvider) Chat(ctx context.Context, messages []Message, tools []T
 		GenerationConfig genConfig `json:"generationConfig"`
 	}
 
+	// Separate system prompt from conversation messages.
+	// Gemini uses a dedicated systemInstruction field.
+	var systemText string
 	var contents []content
 	for _, m := range messages {
+		if m.Role == "system" {
+			systemText = m.Content
+			continue
+		}
 		role := m.Role
 		if role == "assistant" {
 			role = "model"
-		}
-		if role == "system" {
-			role = "user" // Gemini handles system prompts differently
 		}
 		contents = append(contents, content{
 			Role:  role,
@@ -398,12 +402,27 @@ func (p *geminiProvider) Chat(ctx context.Context, messages []Message, tools []T
 		})
 	}
 
-	reqBody := geminiReq{
+	type systemInstruction struct {
+		Parts []part `json:"parts"`
+	}
+
+	type geminiReqFull struct {
+		Contents          []content         `json:"contents"`
+		GenerationConfig  genConfig         `json:"generationConfig"`
+		SystemInstruction *systemInstruction `json:"systemInstruction,omitempty"`
+	}
+
+	reqBody := geminiReqFull{
 		Contents: contents,
 		GenerationConfig: genConfig{
 			MaxOutputTokens: p.maxTokens,
 			Temperature:     p.temperature,
 		},
+	}
+	if systemText != "" {
+		reqBody.SystemInstruction = &systemInstruction{
+			Parts: []part{{Text: systemText}},
+		}
 	}
 
 	body, err := json.Marshal(reqBody)
