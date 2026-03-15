@@ -1,4 +1,4 @@
-{"version": 2, "width": 100, "height": 32, "timestamp": 1773606954, "title": "PennyClaw Deploy Demo", "idle_time_limit": 2.0, "env": {"SHELL": "/bin/bash", "TERM": "xterm-256color"}, "theme": {"fg": "#c0c0c0", "bg": "#1a1a2e", "palette": "#1a1a2e:#e74c3c:#2ecc71:#f39c12:#3498db:#9b59b6:#1abc9c:#ecf0f1:#505050:#e74c3c:#2ecc71:#f39c12:#3498db:#9b59b6:#1abc9c:#ffffff"}}
+{"version": 2, "width": 100, "height": 32, "timestamp": 1773607296, "title": "PennyClaw Deploy Demo", "idle_time_limit": 2.0, "env": {"SHELL": "/bin/bash", "TERM": "xterm-256color"}, "theme": {"fg": "#c0c0c0", "bg": "#1a1a2e", "palette": "#1a1a2e:#e74c3c:#2ecc71:#f39c12:#3498db:#9b59b6:#1abc9c:#ecf0f1:#505050:#e74c3c:#2ecc71:#f39c12:#3498db:#9b59b6:#1abc9c:#ffffff"}}
 [0.5, "o", "\u001b[92muser@cloudshell\u001b[0m:\u001b[34m~/pennyclaw\u001b[0m$ "]
 [0.8, "o", ""]
 [0.86, "o", "b"]
@@ -71,8 +71,8 @@
 [11.34, "o", "  \u2502  Disk (30GB standard)   \u001b[32m$0.00/mo\u001b[0m         \u2502\r\n"]
 [11.39, "o", "  \u2502  Network (standard)     \u001b[32m$0.00/mo\u001b[0m         \u2502\r\n"]
 [11.44, "o", "  \u2502  External IP            \u001b[32m$0.00/mo\u001b[0m         \u2502\r\n"]
-[11.49, "o", "  \u2502\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2502\r\n"]
-[11.54, "o", "  \u2502  \u001b[1mTotal                   \u001b[32m$0.00/mo\u001b[0m\u001b[1m  \ud83e\ude99\u001b[0m      \u2502\r\n"]
+[11.49, "o", "  \u251c\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2524\r\n"]
+[11.54, "o", "  \u2502  \u001b[1mTotal                   \u001b[32m$0.00/mo\u001b[0m\u001b[1m  \ud83e\ude99\u001b[0m    \u2502\r\n"]
 [11.59, "o", "  \u2514\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2518\r\n"]
 [12.09, "o", "\r\n"]
 [12.39, "o", "\u001b[1m\u001b[97m\ud83d\ude80  Phase 2/4: Provisioning VM\u001b[0m\r\n"]
