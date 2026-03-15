@@ -14,11 +14,11 @@ PennyClaw is a lightweight, open-source AI agent built from scratch in Go, desig
 
 | | OpenClaw | NanoClaw | PennyClaw |
 |---|---|---|---|
-| **RAM Usage** | 2-4 GB | ~200 MB | **< 50 MB idle** |
+| **RAM Usage** | 2-4 GB | 200-500 MB | **< 50 MB idle** |
 | **Monthly Cost** | $5-20/mo VPS | $5-20/mo VPS | **$0/mo** |
 | **Deployment** | Complex setup | Docker required | **One click** |
 | **Language** | TypeScript | TypeScript | **Go** |
-| **Codebase** | 430k+ lines | ~500 lines | **~2,000 lines** |
+| **Codebase** | 500k+ lines | ~500 lines | **~2,000 lines** |
 
 > *"I was tired of paying for servers I barely use. GCP gives everyone a free VM forever. So I built PennyClaw."*
 
