@@ -182,19 +182,81 @@ PennyClaw works with any OpenAI-compatible API. To use OpenRouter:
 
 ## Security
 
-PennyClaw includes basic security features:
+PennyClaw includes multiple layers of security:
 
 - **Authentication:** Set `PENNYCLAW_AUTH_TOKEN` env var to require a token for web UI access
+- **Login screen:** The web UI shows a login prompt when auth is enabled, stores the token in localStorage, and sends it as a `Bearer` token with every request
 - **Rate limiting:** 20 requests per minute per IP on the chat endpoint
 - **Sandbox isolation:** Tool execution runs in a restricted environment
 - **systemd hardening:** `ProtectSystem=strict`, `NoNewPrivileges=true`, memory limits
 
 ```bash
-# Set auth token (strongly recommended for public-facing deployments)
-export PENNYCLAW_AUTH_TOKEN="your-secret-token-here"
+# Set auth token (strongly recommended)
+export PENNYCLAW_AUTH_TOKEN=$(openssl rand -hex 24)
+echo "Your token: $PENNYCLAW_AUTH_TOKEN"
 ```
 
 Without `PENNYCLAW_AUTH_TOKEN`, the web UI is open to anyone who discovers your IP.
+
+### Accessing the Web UI Securely
+
+PennyClaw listens on `localhost:3000` by default. Since GCP e2-micro VMs don't have public HTTPS, here are the recommended access methods:
+
+#### Method 1: SSH Tunnel (Recommended — Zero Config)
+
+The simplest and most secure approach. No firewall rules, no domain, no certificates:
+
+```bash
+# From your local machine:
+gcloud compute ssh pennyclaw-vm \
+  --zone=us-central1-a \
+  --ssh-flag="-L 3000:localhost:3000"
+
+# Then open http://localhost:3000 in your browser
+```
+
+This creates an encrypted tunnel from your machine to the VM. The web UI is never exposed to the internet.
+
+#### Method 2: Caddy Reverse Proxy (HTTPS with Let's Encrypt)
+
+If you have a domain and want public HTTPS access:
+
+```bash
+# Install Caddy on the VM
+sudo apt install -y caddy
+
+# Create Caddyfile
+sudo tee /etc/caddy/Caddyfile << 'EOF'
+your-domain.com {
+    reverse_proxy localhost:3000
+}
+EOF
+
+# Restart Caddy (auto-obtains Let's Encrypt certificate)
+sudo systemctl restart caddy
+```
+
+Caddy automatically provisions and renews TLS certificates. You'll also need to open port 443:
+
+```bash
+gcloud compute firewall-rules create allow-https \
+  --allow=tcp:443 --target-tags=pennyclaw
+```
+
+#### Method 3: Cloudflare Tunnel (No Open Ports)
+
+For public access without opening any firewall ports:
+
+```bash
+# Install cloudflared
+curl -L https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64 -o cloudflared
+sudo mv cloudflared /usr/local/bin/ && sudo chmod +x /usr/local/bin/cloudflared
+
+# Quick tunnel (generates a random *.trycloudflare.com URL)
+cloudflared tunnel --url http://localhost:3000
+```
+
+> **Note:** The SSH tunnel method uses zero additional resources and is ideal for the e2-micro's constrained environment.
 
 ## Built-in Skills
 
