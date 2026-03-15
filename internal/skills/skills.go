@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/url"
 	"strings"
@@ -290,13 +291,18 @@ func (r *Registry) registerBuiltins() {
 			}
 
 			// Validate URL
-			parsedURL, err := url.Parse(params.URL)
-			if err != nil {
-				return "", fmt.Errorf("invalid URL: %w", err)
-			}
-			if parsedURL.Scheme != "http" && parsedURL.Scheme != "https" {
-				return "", fmt.Errorf("only http and https URLs are supported")
-			}
+				parsedURL, err := url.Parse(params.URL)
+				if err != nil {
+					return "", fmt.Errorf("invalid URL: %w", err)
+				}
+				if parsedURL.Scheme != "http" && parsedURL.Scheme != "https" {
+					return "", fmt.Errorf("only http and https URLs are supported")
+				}
+
+				// SSRF protection: block requests to internal/metadata IPs
+				if err := validateExternalHost(parsedURL.Hostname()); err != nil {
+					return "", err
+				}
 
 			var bodyReader io.Reader
 			if params.Body != "" {
@@ -334,6 +340,47 @@ func (r *Registry) registerBuiltins() {
 			return result, nil
 		},
 	})
+}
+
+// validateExternalHost checks that a hostname does not resolve to an internal,
+// loopback, link-local, or cloud metadata IP address (SSRF protection).
+func validateExternalHost(host string) error {
+	// Block well-known metadata hostnames
+	blockedHosts := []string{
+		"metadata.google.internal",
+		"metadata.google",
+		"metadata",
+	}
+	lowerHost := strings.ToLower(host)
+	for _, blocked := range blockedHosts {
+		if lowerHost == blocked {
+			return fmt.Errorf("requests to %s are blocked (SSRF protection)", host)
+		}
+	}
+
+	// Resolve the hostname and check each IP
+	ips, err := net.LookupHost(host)
+	if err != nil {
+		// If we can't resolve, let the HTTP client handle the error
+		return nil
+	}
+
+	for _, ipStr := range ips {
+		ip := net.ParseIP(ipStr)
+		if ip == nil {
+			continue
+		}
+		if ip.IsLoopback() || ip.IsPrivate() || ip.IsLinkLocalUnicast() ||
+			ip.IsLinkLocalMulticast() || ip.IsUnspecified() {
+			return fmt.Errorf("requests to internal IP %s (%s) are blocked (SSRF protection)", host, ipStr)
+		}
+		// Specifically block 169.254.169.254 (cloud metadata)
+		if ipStr == "169.254.169.254" {
+			return fmt.Errorf("requests to cloud metadata endpoint are blocked (SSRF protection)")
+		}
+	}
+
+	return nil
 }
 
 // stripHTMLTags removes HTML tags from a string (simple regex-free approach).

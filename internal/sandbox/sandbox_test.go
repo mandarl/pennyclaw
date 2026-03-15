@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -235,6 +236,55 @@ func TestCleanup(t *testing.T) {
 	// Verify directory is gone
 	if _, err := os.Stat(workDir); !os.IsNotExist(err) {
 		t.Error("workDir should not exist after cleanup")
+	}
+}
+
+func TestPathTraversalBlocked(t *testing.T) {
+	sb := newTestSandbox(t)
+
+	traversalPaths := []string{
+		"../../etc/passwd",
+		"../../../etc/shadow",
+		"subdir/../../etc/passwd",
+		"../secret.txt",
+	}
+
+	for _, p := range traversalPaths {
+		t.Run("read_"+p, func(t *testing.T) {
+			_, err := sb.ReadFile(p)
+			if err == nil {
+				t.Errorf("ReadFile(%q) should have been blocked", p)
+			}
+			if err != nil && !strings.Contains(err.Error(), "escapes sandbox") {
+				// Could be a "no such file" error if path resolves inside sandbox
+				// but we want to ensure traversal paths are caught
+				t.Logf("ReadFile(%q) error: %v", p, err)
+			}
+		})
+
+		t.Run("write_"+p, func(t *testing.T) {
+			err := sb.WriteFile(p, "malicious content")
+			if err == nil {
+				t.Errorf("WriteFile(%q) should have been blocked", p)
+			}
+		})
+	}
+}
+
+func TestSafePathAllowsValidPaths(t *testing.T) {
+	sb := newTestSandbox(t)
+
+	validPaths := []string{
+		"file.txt",
+		"subdir/file.txt",
+		"a/b/c/deep.txt",
+	}
+
+	for _, p := range validPaths {
+		_, err := sb.safePath(p)
+		if err != nil {
+			t.Errorf("safePath(%q) should be allowed, got error: %v", p, err)
+		}
 	}
 }
 

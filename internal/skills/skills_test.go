@@ -169,6 +169,38 @@ func TestRegistryAsTools(t *testing.T) {
 	}
 }
 
+func TestValidateExternalHost(t *testing.T) {
+	// These should be blocked
+	blockedHosts := []string{
+		"metadata.google.internal",
+		"metadata.google",
+		"metadata",
+		"localhost",
+		"127.0.0.1",
+	}
+
+	for _, host := range blockedHosts {
+		err := validateExternalHost(host)
+		if err == nil {
+			t.Errorf("validateExternalHost(%q) should have been blocked", host)
+		}
+	}
+
+	// These should be allowed
+	allowedHosts := []string{
+		"example.com",
+		"api.openai.com",
+		"google.com",
+	}
+
+	for _, host := range allowedHosts {
+		err := validateExternalHost(host)
+		if err != nil {
+			t.Errorf("validateExternalHost(%q) should be allowed, got: %v", host, err)
+		}
+	}
+}
+
 func TestRegistryOverwrite(t *testing.T) {
 	r := &Registry{
 		skills: make(map[string]*Skill),

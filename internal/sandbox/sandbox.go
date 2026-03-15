@@ -155,9 +155,25 @@ func (s *Sandbox) ExecuteShell(ctx context.Context, shellCmd string) (*Result, e
 	return s.Execute(ctx, "/bin/sh", "-c", shellCmd)
 }
 
+// safePath resolves a relative file path within the sandbox working directory
+// and rejects any path that escapes it (e.g. via "../" traversal).
+func (s *Sandbox) safePath(name string) (string, error) {
+	// Clean the path to resolve any . or .. components
+	resolved := filepath.Clean(filepath.Join(s.config.WorkDir, name))
+	// Ensure the resolved path is still within the working directory
+	if !strings.HasPrefix(resolved, filepath.Clean(s.config.WorkDir)+string(filepath.Separator)) &&
+		resolved != filepath.Clean(s.config.WorkDir) {
+		return "", fmt.Errorf("path %q escapes sandbox directory", name)
+	}
+	return resolved, nil
+}
+
 // WriteFile writes a file in the sandbox working directory.
 func (s *Sandbox) WriteFile(name, content string) error {
-	path := filepath.Join(s.config.WorkDir, name)
+	path, err := s.safePath(name)
+	if err != nil {
+		return err
+	}
 	dir := filepath.Dir(path)
 	if err := os.MkdirAll(dir, 0755); err != nil {
 		return err
@@ -167,7 +183,10 @@ func (s *Sandbox) WriteFile(name, content string) error {
 
 // ReadFile reads a file from the sandbox working directory.
 func (s *Sandbox) ReadFile(name string) (string, error) {
-	path := filepath.Join(s.config.WorkDir, name)
+	path, err := s.safePath(name)
+	if err != nil {
+		return "", err
+	}
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return "", err

@@ -408,6 +408,13 @@ if [ ! -f config.json ]; then
 CONFIG
 fi
 
+# Generate auth token if not already set in .env
+if [ ! -f .env ] || ! grep -q PENNYCLAW_AUTH_TOKEN .env 2>/dev/null; then
+    AUTH_TOKEN=$(openssl rand -hex 32)
+    echo "PENNYCLAW_AUTH_TOKEN=${AUTH_TOKEN}" >> .env
+    echo "Generated authentication token: ${AUTH_TOKEN}"
+fi
+
 # Create systemd service
 cat > /etc/systemd/system/pennyclaw.service <<'SERVICE'
 [Unit]
@@ -554,14 +561,31 @@ echo -e "  ${BOLD}Access your agent:${NC}"
 echo -e "  • Web UI: ${CYAN}http://${EXTERNAL_IP}:3000${NC}"
 echo -e "  • Health: ${CYAN}http://${EXTERNAL_IP}:3000/api/health${NC}"
 echo ""
+# Retrieve the auto-generated auth token
+AUTH_TOKEN=$(gcloud compute ssh "$INSTANCE_NAME" \
+    --zone="$BEST_ZONE" \
+    --project="$PROJECT" \
+    --command="grep PENNYCLAW_AUTH_TOKEN /opt/pennyclaw/.env 2>/dev/null | cut -d= -f2" \
+    2>/dev/null || echo "")
+
+if [[ -n "$AUTH_TOKEN" ]]; then
+    echo -e "  ${BOLD}${YELLOW}⚠  Authentication Token (save this!):${NC}"
+    echo -e "  ┌─────────────────────────────────────────────────────────────────────┐"
+    echo -e "  │ ${CYAN}${AUTH_TOKEN}${NC} │"
+    echo -e "  └─────────────────────────────────────────────────────────────────────┘"
+    echo -e "  You'll need this token to sign in to the web UI."
+    echo ""
+fi
+
 echo -e "  ${BOLD}Next steps:${NC}"
 echo -e "  1. Set your LLM API key:"
 echo -e "     ${CYAN}gcloud compute ssh ${INSTANCE_NAME} --zone=${BEST_ZONE}${NC}"
-echo -e "     ${CYAN}echo 'OPENAI_API_KEY=sk-your-key-here' | sudo tee /opt/pennyclaw/.env${NC}"
+echo -e "     ${CYAN}echo 'OPENAI_API_KEY=sk-your-key-here' | sudo tee -a /opt/pennyclaw/.env${NC}"
 echo -e "     ${CYAN}sudo systemctl restart pennyclaw${NC}"
 echo ""
-echo -e "  2. (Optional) Set up secure access with Cloudflare Tunnel:"
-echo -e "     ${CYAN}https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/${NC}"
+echo -e "  2. (Recommended) Set up secure access with SSH tunnel or Cloudflare Tunnel:"
+echo -e "     ${CYAN}ssh -L 3000:localhost:3000 pennyclaw-instance${NC}  (SSH tunnel)"
+echo -e "     ${CYAN}https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/${NC}  (Cloudflare)"
 echo ""
 echo -e "  ${BOLD}Useful commands:${NC}"
 echo -e "  • SSH:     ${CYAN}gcloud compute ssh ${INSTANCE_NAME} --zone=${BEST_ZONE}${NC}"
