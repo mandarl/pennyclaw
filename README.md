@@ -97,36 +97,39 @@ docker run -p 3000:3000 \
 
 ## Architecture
 
-```
-┌─────────────────────────────────────────────────────┐
-│                    PennyClaw                         │
-│                                                     │
-│  ┌──────────┐  ┌──────────┐  ┌──────────────────┐  │
-│  │ Web UI   │  │ Telegram │  │ Discord          │  │
-│  │ :3000    │  │ Bot      │  │ Bot              │  │
-│  └────┬─────┘  └────┬─────┘  └────┬─────────────┘  │
-│       │              │              │                │
-│       └──────────────┼──────────────┘                │
-│                      │                               │
-│              ┌───────▼────────┐                      │
-│              │   Agent Loop   │                      │
-│              │  (core logic)  │                      │
-│              └───┬───────┬───┘                      │
-│                  │       │                           │
-│          ┌───────▼──┐ ┌──▼────────┐                 │
-│          │ LLM      │ │ Skills    │                 │
-│          │ Provider  │ │ Registry  │                 │
-│          └──────────┘ └──┬────────┘                 │
-│                          │                           │
-│              ┌───────────▼──────────┐               │
-│              │   Sandbox            │               │
-│              │ (namespaces/cgroups) │               │
-│              └──────────────────────┘               │
-│                                                     │
-│  ┌──────────────┐                                   │
-│  │ SQLite Memory │  < 50MB idle / < 200MB active    │
-│  └──────────────┘                                   │
-└─────────────────────────────────────────────────────┘
+```mermaid
+graph TD
+    subgraph Channels["🔌 Channels"]
+        direction LR
+        WEB["🌐 Web UI · :3000"]
+        TG["📱 Telegram Bot"]
+        DC["🎮 Discord Bot"]
+    end
+
+    AGENT["🔄 Agent Loop"]
+
+    LLM["🧠 LLM Gateway\nOpenAI · Anthropic · Gemini · OpenRouter"]
+    SKILLS["🛠️ Skills\nshell · files · web · search · http"]
+    SANDBOX["🔒 Sandbox\nnamespaces · cgroups · non-root"]
+    SQLITE["🗄️ SQLite\nconversation memory"]
+
+    WEB --> AGENT
+    TG --> AGENT
+    DC --> AGENT
+    AGENT --> LLM
+    AGENT --> SKILLS
+    AGENT -.-> SQLITE
+    SKILLS --> SANDBOX
+
+    style Channels fill:#064e3b,stroke:#34d399,stroke-width:2px,color:#34d399
+    style WEB fill:#065f46,stroke:#6ee7b7,color:#fff
+    style TG fill:#065f46,stroke:#6ee7b7,color:#fff
+    style DC fill:#065f46,stroke:#6ee7b7,color:#fff
+    style AGENT fill:#7c3aed,stroke:#c4b5fd,stroke-width:3px,color:#fff
+    style LLM fill:#1e40af,stroke:#93c5fd,stroke-width:2px,color:#fff
+    style SKILLS fill:#1e40af,stroke:#93c5fd,stroke-width:2px,color:#fff
+    style SANDBOX fill:#991b1b,stroke:#fca5a5,stroke-width:2px,color:#fff
+    style SQLITE fill:#92400e,stroke:#fcd34d,stroke-width:2px,color:#fff
 ```
 
 ## GCP Free Tier Specs
