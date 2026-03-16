@@ -667,14 +667,22 @@ ok "Firewall configured"
 # ============================================================================
 step "PHASE 8: Post-Deploy Health Checks"
 
-info "Waiting for instance to start (this takes ~60 seconds)..."
-sleep 10
+info "Waiting for instance to boot and run startup script..."
+info "(the startup script installs packages and downloads PennyClaw — typically 2-3 minutes on e2-micro)"
+echo ""
 
-# Get external IP
-EXTERNAL_IP=$(gcloud compute instances describe "$INSTANCE_NAME" \
-    --zone="$BEST_ZONE" \
-    --project="$PROJECT" \
-    --format="value(networkInterfaces[0].accessConfigs[0].natIP)" 2>/dev/null)
+# Get external IP (retry a few times in case the instance isn't fully up yet)
+EXTERNAL_IP=""
+for attempt in 1 2 3; do
+    EXTERNAL_IP=$(gcloud compute instances describe "$INSTANCE_NAME" \
+        --zone="$BEST_ZONE" \
+        --project="$PROJECT" \
+        --format="value(networkInterfaces[0].accessConfigs[0].natIP)" 2>/dev/null || echo "")
+    if [[ -n "$EXTERNAL_IP" ]]; then
+        break
+    fi
+    sleep 5
+done
 
 if [[ -n "$EXTERNAL_IP" ]]; then
     ok "External IP: ${EXTERNAL_IP}"
@@ -682,21 +690,44 @@ else
     warn "Could not determine external IP"
 fi
 
-# Wait for startup script to complete
-info "Waiting for PennyClaw to initialize..."
-for i in $(seq 1 12); do
-    sleep 10
-    STATUS=$(curl -s -o /dev/null -w "%{http_code}" "http://${EXTERNAL_IP}:3000/api/health" 2>/dev/null || echo "000")
+# Wait for startup script to complete and PennyClaw to respond
+# e2-micro typical boot: 20s VM + 60-90s apt-get + 10s download + 5s start = ~120s
+info "Waiting for PennyClaw to come online..."
+MAX_ATTEMPTS=18
+POLL_INTERVAL=10
+STATUS="000"
+START_TIME=$SECONDS
+
+# Give the startup script a head start before polling
+sleep 30
+
+for i in $(seq 1 $MAX_ATTEMPTS); do
+    ELAPSED=$(( SECONDS - START_TIME ))
+    STATUS=$(curl -s -o /dev/null -w "%{http_code}" --connect-timeout 5 "http://${EXTERNAL_IP}:3000/api/health" 2>/dev/null || echo "000")
     if [[ "$STATUS" == "200" ]]; then
-        ok "PennyClaw is healthy!"
+        ok "PennyClaw is healthy! (took ${ELAPSED}s)"
         break
     fi
-    info "  Attempt ${i}/12 — status: ${STATUS} (waiting...)"
+
+    # Show progress with context about what's likely happening
+    if [[ $ELAPSED -lt 60 ]]; then
+        STAGE="installing packages"
+    elif [[ $ELAPSED -lt 120 ]]; then
+        STAGE="downloading binary"
+    else
+        STAGE="starting service"
+    fi
+    printf "\r  ${CYAN}⠋${NC}  Waiting... %ds elapsed (%s)     " "$ELAPSED" "$STAGE"
+    sleep $POLL_INTERVAL
 done
+printf "\r%-80s\r" ""
 
 if [[ "$STATUS" != "200" ]]; then
-    warn "PennyClaw hasn't responded yet. It may still be installing."
-    info "Check logs: gcloud compute ssh ${INSTANCE_NAME} --zone=${BEST_ZONE} -- 'sudo journalctl -u pennyclaw -f'"
+    ELAPSED=$(( SECONDS - START_TIME ))
+    warn "PennyClaw hasn't responded after ${ELAPSED}s. It may still be installing."
+    info "This is normal for first-time setup on e2-micro. Check progress with:"
+    info "  gcloud compute ssh ${INSTANCE_NAME} --zone=${BEST_ZONE} -- 'sudo journalctl -u pennyclaw -f'"
+    info "  gcloud compute ssh ${INSTANCE_NAME} --zone=${BEST_ZONE} -- 'tail -f /var/log/syslog | grep startup-script'"
 fi
 
 # Check memory usage
