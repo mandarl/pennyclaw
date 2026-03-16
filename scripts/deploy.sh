@@ -600,7 +600,7 @@ if [ ! -f config.json ]; then
   },
   "channels": { "web": { "enabled": true } },
   "memory": { "db_path": "data/pennyclaw.db", "max_history": 50, "persist_sessions": true },
-  "sandbox": { "enabled": true, "work_dir": "/tmp/pennyclaw-sandbox", "max_timeout": 30, "max_memory": 128 },
+  "sandbox": { "enabled": true, "work_dir": "/opt/pennyclaw/sandbox", "max_timeout": 30, "max_memory": 128 },
   "system_prompt": "You are PennyClaw, a helpful personal AI assistant."
 }
 CONFIG
@@ -636,7 +636,7 @@ CPUQuota=80%
 NoNewPrivileges=true
 ProtectSystem=strict
 ProtectHome=true
-ReadWritePaths=/opt/pennyclaw/data /tmp/pennyclaw-sandbox
+ReadWritePaths=/opt/pennyclaw/data /opt/pennyclaw/sandbox
 PrivateTmp=true
 
 # Environment
@@ -648,8 +648,8 @@ SERVICE
 
 # Create pennyclaw user
 useradd -r -s /bin/false pennyclaw 2>/dev/null || true
-mkdir -p /tmp/pennyclaw-sandbox
-chown -R pennyclaw:pennyclaw /opt/pennyclaw /tmp/pennyclaw-sandbox 2>/dev/null || true
+mkdir -p /opt/pennyclaw/sandbox
+chown -R pennyclaw:pennyclaw /opt/pennyclaw 2>/dev/null || true
 
 # Enable and start
 systemctl daemon-reload
