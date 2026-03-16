@@ -647,14 +647,27 @@ STARTUP_SCRIPT_FILE=$(mktemp /tmp/pennyclaw-startup-XXXXXX.sh)
 echo "$STARTUP_SCRIPT" > "$STARTUP_SCRIPT_FILE"
 trap 'rm -f "$STARTUP_SCRIPT_FILE"' EXIT
 
+# Pre-generate SSH keys if they don't exist (suppresses noisy gcloud SSH warnings)
+if [[ ! -f "$HOME/.ssh/google_compute_engine" ]]; then
+    info "Generating SSH keys for GCP access..."
+    mkdir -p "$HOME/.ssh"
+    ssh-keygen -t rsa -f "$HOME/.ssh/google_compute_engine" -C "$(whoami)" -N "" -q
+    ok "SSH keys generated"
+fi
+
 # Handle upgrade mode: stop existing service, redeploy binary
 if [[ "${UPGRADE_MODE:-false}" == "true" ]]; then
     info "Upgrading existing instance: ${EXISTING_PC}..."
-    timeout 20 gcloud compute ssh "$EXISTING_PC" \
+    if run_with_spinner "Stopping PennyClaw service" timeout 20 gcloud compute ssh "$EXISTING_PC" \
         --zone="$BEST_ZONE" \
         --project="$PROJECT" \
         --ssh-flag="-o ConnectTimeout=10" \
-        --command="sudo systemctl stop pennyclaw 2>/dev/null; echo 'Service stopped'" || true
+        --ssh-flag="-o StrictHostKeyChecking=no" \
+        --command="sudo systemctl stop pennyclaw 2>/dev/null; echo 'Service stopped'"; then
+        ok "Service stopped"
+    else
+        warn "Could not stop service (instance may still be starting up)"
+    fi
     INSTANCE_NAME="$EXISTING_PC"
     # Re-run startup script on existing instance
     gcloud compute instances add-metadata "$INSTANCE_NAME" \
