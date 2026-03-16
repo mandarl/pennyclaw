@@ -605,6 +605,12 @@ echo "=== PennyClaw Setup Complete: $(date) ==="
 STARTUP
 )
 
+# Write startup script to a temp file (avoids gcloud --metadata parsing issues
+# with JSON curly braces in the script body)
+STARTUP_SCRIPT_FILE=$(mktemp /tmp/pennyclaw-startup-XXXXXX.sh)
+echo "$STARTUP_SCRIPT" > "$STARTUP_SCRIPT_FILE"
+trap 'rm -f "$STARTUP_SCRIPT_FILE"' EXIT
+
 # Handle upgrade mode: stop existing service, redeploy binary
 if [[ "${UPGRADE_MODE:-false}" == "true" ]]; then
     info "Upgrading existing instance: ${EXISTING_PC}..."
@@ -617,7 +623,7 @@ if [[ "${UPGRADE_MODE:-false}" == "true" ]]; then
     gcloud compute instances add-metadata "$INSTANCE_NAME" \
         --zone="$BEST_ZONE" \
         --project="$PROJECT" \
-        --metadata=startup-script="$STARTUP_SCRIPT" 2>/dev/null
+        --metadata-from-file=startup-script="$STARTUP_SCRIPT_FILE" 2>/dev/null
     gcloud compute instances reset "$INSTANCE_NAME" \
         --zone="$BEST_ZONE" \
         --project="$PROJECT"
@@ -633,7 +639,7 @@ else
     --image-project="$IMAGE_PROJECT" \
     --boot-disk-size="${DISK_SIZE_GB}GB" \
     --boot-disk-type="$DISK_TYPE" \
-    --metadata=startup-script="$STARTUP_SCRIPT" \
+    --metadata-from-file=startup-script="$STARTUP_SCRIPT_FILE" \
     --tags=pennyclaw-server \
     --scopes=default \
     --no-restart-on-failure
