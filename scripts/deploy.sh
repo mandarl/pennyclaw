@@ -13,7 +13,7 @@ set -euo pipefail
 # ============================================================================
 # Constants
 # ============================================================================
-VERSION="0.1.1"
+VERSION="0.2.0"
 INSTANCE_PREFIX="pennyclaw"
 MACHINE_TYPE="e2-micro"
 DISK_SIZE_GB=30
@@ -544,7 +544,7 @@ apt-get install -y -qq curl sqlite3 unattended-upgrades
 dpkg-reconfigure -plow unattended-upgrades < /dev/null 2>/dev/null || true
 
 # Download PennyClaw binary
-PENNYCLAW_VERSION="0.1.1"
+PENNYCLAW_VERSION="0.2.0"
 echo "Downloading PennyClaw v${PENNYCLAW_VERSION}..."
 mkdir -p /opt/pennyclaw/data
 cd /opt/pennyclaw
@@ -823,13 +823,25 @@ echo -e "  ${BOLD}Access your agent:${NC}"
 echo -e "  • Web UI: ${CYAN}http://${EXTERNAL_IP}:3000${NC}"
 echo -e "  • Health: ${CYAN}http://${EXTERNAL_IP}:3000/api/health${NC}"
 echo ""
-# Retrieve the auto-generated auth token
-AUTH_TOKEN=$(timeout 15 gcloud compute ssh "$INSTANCE_NAME" \
-    --zone="$BEST_ZONE" \
-    --project="$PROJECT" \
-    --ssh-flag="-o ConnectTimeout=10" \
-    --command="grep PENNYCLAW_AUTH_TOKEN /opt/pennyclaw/.env 2>/dev/null | cut -d= -f2" \
-    2>/dev/null || echo "")
+# Retrieve the auto-generated auth token (retry up to 3 times — startup script may still be running)
+AUTH_TOKEN=""
+for attempt in 1 2 3; do
+    AUTH_TOKEN=$(timeout 20 gcloud compute ssh "$INSTANCE_NAME" \
+        --zone="$BEST_ZONE" \
+        --project="$PROJECT" \
+        --ssh-flag="-o ConnectTimeout=10" \
+        --ssh-flag="-o StrictHostKeyChecking=no" \
+        --command="sudo grep PENNYCLAW_AUTH_TOKEN /opt/pennyclaw/.env 2>/dev/null | cut -d= -f2" \
+        2>/dev/null || echo "")
+    # Strip whitespace/control chars
+    AUTH_TOKEN=$(echo "$AUTH_TOKEN" | tr -d '[:space:]')
+    if [[ -n "$AUTH_TOKEN" ]]; then
+        break
+    fi
+    if [[ $attempt -lt 3 ]]; then
+        sleep 10
+    fi
+done
 
 if [[ -n "$AUTH_TOKEN" ]]; then
     echo -e "  ${BOLD}${YELLOW}⚠  Authentication Token (save this!):${NC}"
@@ -837,6 +849,11 @@ if [[ -n "$AUTH_TOKEN" ]]; then
     echo -e "  │ ${CYAN}${AUTH_TOKEN}${NC} │"
     echo -e "  └─────────────────────────────────────────────────────────────────────┘"
     echo -e "  You'll need this token to sign in to the web UI."
+    echo ""
+else
+    warn "Could not retrieve auth token automatically."
+    echo -e "  To get your token, run:"
+    echo -e "  ${CYAN}gcloud compute ssh ${INSTANCE_NAME} --zone=${BEST_ZONE} -- 'sudo grep PENNYCLAW_AUTH_TOKEN /opt/pennyclaw/.env'${NC}"
     echo ""
 fi
 

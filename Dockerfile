@@ -12,7 +12,7 @@ RUN go mod download
 
 COPY . .
 RUN CGO_ENABLED=1 GOOS=linux go build \
-    -ldflags="-s -w -X main.version=0.1.0 -X main.buildDate=$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+    -ldflags="-s -w -X main.version=0.2.0 -X main.buildDate=$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
     -o pennyclaw ./cmd/pennyclaw
 
 # Runtime stage
