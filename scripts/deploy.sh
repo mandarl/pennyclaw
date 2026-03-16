@@ -636,7 +636,7 @@ CPUQuota=80%
 NoNewPrivileges=true
 ProtectSystem=strict
 ProtectHome=true
-ReadWritePaths=/opt/pennyclaw/data /opt/pennyclaw/sandbox
+ReadWritePaths=/opt/pennyclaw
 PrivateTmp=true
 
 # Environment
@@ -817,61 +817,70 @@ fi
 # ============================================================================
 step "PHASE 9: Setup Complete!"
 
-echo -e "  ${GREEN}${BOLD}🎉 PennyClaw is deployed and running!${NC}"
-echo ""
-echo -e "  ${BOLD}Access your agent:${NC}"
-echo -e "  • Web UI: ${CYAN}http://${EXTERNAL_IP}:3000${NC}"
-echo -e "  • Health: ${CYAN}http://${EXTERNAL_IP}:3000/api/health${NC}"
-echo ""
-# Retrieve the auto-generated auth token (retry up to 3 times — startup script may still be running)
+# Retrieve the auto-generated auth token (retry up to 5 times with increasing wait)
 AUTH_TOKEN=""
-for attempt in 1 2 3; do
+for attempt in 1 2 3 4 5; do
     AUTH_TOKEN=$(timeout 20 gcloud compute ssh "$INSTANCE_NAME" \
         --zone="$BEST_ZONE" \
         --project="$PROJECT" \
         --ssh-flag="-o ConnectTimeout=10" \
         --ssh-flag="-o StrictHostKeyChecking=no" \
-        --command="sudo grep PENNYCLAW_AUTH_TOKEN /opt/pennyclaw/.env 2>/dev/null | cut -d= -f2" \
+        --command="sudo cat /opt/pennyclaw/.env 2>/dev/null | grep PENNYCLAW_AUTH_TOKEN | head -1 | cut -d= -f2" \
         2>/dev/null || echo "")
     # Strip whitespace/control chars
-    AUTH_TOKEN=$(echo "$AUTH_TOKEN" | tr -d '[:space:]')
-    if [[ -n "$AUTH_TOKEN" ]]; then
+    AUTH_TOKEN=$(echo "$AUTH_TOKEN" | tr -d '[:space:]' | tr -d '\r')
+    if [[ -n "$AUTH_TOKEN" && ${#AUTH_TOKEN} -ge 16 ]]; then
         break
     fi
-    if [[ $attempt -lt 3 ]]; then
-        sleep 10
-    fi
+    AUTH_TOKEN=""
+    sleep $((attempt * 5))
 done
 
+# Install SSH login banner on the VM
+timeout 20 gcloud compute ssh "$INSTANCE_NAME" \
+    --zone="$BEST_ZONE" \
+    --project="$PROJECT" \
+    --ssh-flag="-o ConnectTimeout=10" \
+    --ssh-flag="-o StrictHostKeyChecking=no" \
+    --command="sudo bash -c 'cat > /etc/motd << INNERMOTD
+
+  PennyClaw AI Agent v${VERSION}
+  ────────────────────────────────────────
+  Web UI:    http://\$(hostname -I | awk "{print \\\$1}"):3000
+  Config:    /opt/pennyclaw/config.json
+  Env:       /opt/pennyclaw/.env
+  Data:      /opt/pennyclaw/data/
+
+  Commands:
+    sudo journalctl -u pennyclaw -f       (view logs)
+    sudo systemctl restart pennyclaw      (restart)
+    sudo systemctl status pennyclaw       (status)
+    sudo cat /opt/pennyclaw/.env          (view auth token)
+
+  All settings (API key, model, etc.) can be changed
+  from the Settings panel in the web UI.
+  ────────────────────────────────────────
+
+INNERMOTD
+'" 2>/dev/null || true
+
+echo -e "  ${GREEN}${BOLD}🎉 PennyClaw is deployed and running!${NC}"
+echo ""
+
 if [[ -n "$AUTH_TOKEN" ]]; then
-    echo -e "  ${BOLD}${YELLOW}⚠  Authentication Token (save this!):${NC}"
-    echo -e "  ┌─────────────────────────────────────────────────────────────────────┐"
-    echo -e "  │ ${CYAN}${AUTH_TOKEN}${NC} │"
-    echo -e "  └─────────────────────────────────────────────────────────────────────┘"
-    echo -e "  You'll need this token to sign in to the web UI."
+    echo -e "  ${BOLD}Open this URL to get started:${NC}"
+    echo ""
+    echo -e "  ${CYAN}http://${EXTERNAL_IP}:3000?token=${AUTH_TOKEN}${NC}"
     echo ""
 else
-    warn "Could not retrieve auth token automatically."
-    echo -e "  To get your token, run:"
-    echo -e "  ${CYAN}gcloud compute ssh ${INSTANCE_NAME} --zone=${BEST_ZONE} -- 'sudo grep PENNYCLAW_AUTH_TOKEN /opt/pennyclaw/.env'${NC}"
+    echo -e "  ${BOLD}Web UI:${NC} ${CYAN}http://${EXTERNAL_IP}:3000${NC}"
+    echo ""
+    echo -e "  ${YELLOW}⚠  Could not retrieve auth token automatically.${NC}"
+    echo -e "  SSH in and run: ${CYAN}sudo cat /opt/pennyclaw/.env${NC}"
     echo ""
 fi
 
-echo -e "  ${BOLD}Next steps:${NC}"
-echo -e "  1. Set your LLM API key:"
-echo -e "     ${CYAN}gcloud compute ssh ${INSTANCE_NAME} --zone=${BEST_ZONE}${NC}"
-echo -e "     ${CYAN}echo 'OPENAI_API_KEY=sk-your-key-here' | sudo tee -a /opt/pennyclaw/.env${NC}"
-echo -e "     ${CYAN}sudo systemctl restart pennyclaw${NC}"
-echo ""
-echo -e "  2. (Recommended) Set up secure access with SSH tunnel or Cloudflare Tunnel:"
-echo -e "     ${CYAN}ssh -L 3000:localhost:3000 pennyclaw-instance${NC}  (SSH tunnel)"
-echo -e "     ${CYAN}https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/${NC}  (Cloudflare)"
-echo ""
-echo -e "  ${BOLD}Useful commands:${NC}"
-echo -e "  • SSH:     ${CYAN}gcloud compute ssh ${INSTANCE_NAME} --zone=${BEST_ZONE}${NC}"
-echo -e "  • Logs:    ${CYAN}gcloud compute ssh ${INSTANCE_NAME} --zone=${BEST_ZONE} -- 'sudo journalctl -u pennyclaw -f'${NC}"
-echo -e "  • Restart: ${CYAN}gcloud compute ssh ${INSTANCE_NAME} --zone=${BEST_ZONE} -- 'sudo systemctl restart pennyclaw'${NC}"
-echo -e "  • Teardown: ${CYAN}make teardown${NC}"
+echo -e "  ${BOLD}SSH:${NC}  ${CYAN}gcloud compute ssh ${INSTANCE_NAME} --zone=${BEST_ZONE}${NC}"
 echo ""
 
 # Generate teardown script

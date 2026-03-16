@@ -378,6 +378,19 @@ const indexHTML = `<!DOCTYPE html>
 let sessionId = 'web-' + Date.now();
 let isWelcome = true;
 let authToken = localStorage.getItem('pennyclaw_token') || '';
+
+// Auto-login from ?token= query param (used by deploy script one-click URL)
+(function checkUrlToken() {
+  const params = new URLSearchParams(window.location.search);
+  const urlToken = params.get('token');
+  if (urlToken) {
+    authToken = urlToken;
+    localStorage.setItem('pennyclaw_token', urlToken);
+    // Strip token from URL bar so it doesn't linger in browser history
+    const clean = window.location.pathname;
+    window.history.replaceState({}, '', clean);
+  }
+})();
 let logsInterval = null;
 let currentPanel = null;
 let notifEnabled = localStorage.getItem('pennyclaw_notif') !== 'false';
