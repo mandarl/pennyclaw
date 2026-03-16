@@ -516,7 +516,8 @@ SKIP_TO_HEALTH_CHECK=false
 # Create startup script
 STARTUP_SCRIPT=$(cat <<'STARTUP'
 #!/bin/bash
-set -euo pipefail
+# NOTE: Do NOT use 'set -e' here — startup scripts run non-interactively
+# and many commands (dpkg-reconfigure, sysctl) return non-zero in that context.
 
 # Log everything
 exec > >(tee /var/log/pennyclaw-setup.log) 2>&1
@@ -532,15 +533,15 @@ if [ ! -f /swapfile ]; then
     echo '/swapfile none swap sw 0 0' >> /etc/fstab
     # Tune swappiness for low-memory operation
     echo 'vm.swappiness=10' >> /etc/sysctl.conf
-    sysctl -p
+    sysctl -p || true
 fi
 
 # Install dependencies
 apt-get update -qq
 apt-get install -y -qq curl sqlite3 unattended-upgrades
 
-# Enable automatic security updates
-dpkg-reconfigure -plow unattended-upgrades
+# Enable automatic security updates (non-interactive, may fail in startup script context)
+dpkg-reconfigure -plow unattended-upgrades < /dev/null 2>/dev/null || true
 
 # Download PennyClaw binary
 PENNYCLAW_VERSION="0.1.1"
@@ -558,19 +559,32 @@ esac
 
 # Download from GitHub releases
 TARBALL="pennyclaw-linux-${ARCH_SUFFIX}.tar.gz"
-curl -fsSL "https://github.com/mandarl/pennyclaw/releases/download/v${PENNYCLAW_VERSION}/${TARBALL}" \
-    -o "/tmp/${TARBALL}" && \
-    tar -xzf "/tmp/${TARBALL}" -C /opt/pennyclaw/ && \
-    rm -f "/tmp/${TARBALL}" || {
+if curl -fsSL "https://github.com/mandarl/pennyclaw/releases/download/v${PENNYCLAW_VERSION}/${TARBALL}" \
+    -o "/tmp/${TARBALL}"; then
+    tar -xzf "/tmp/${TARBALL}" -C /opt/pennyclaw/
+    rm -f "/tmp/${TARBALL}"
+    # Rename extracted binary to 'pennyclaw' (tarball contains 'pennyclaw-linux-amd64' etc.)
+    if [ ! -f /opt/pennyclaw/pennyclaw ]; then
+        mv /opt/pennyclaw/pennyclaw-linux-* /opt/pennyclaw/pennyclaw 2>/dev/null || true
+    fi
+else
     echo "Download failed. Building from source..."
     apt-get install -y -qq golang-go gcc libsqlite3-dev
     git clone https://github.com/mandarl/pennyclaw.git /tmp/pennyclaw-src
     cd /tmp/pennyclaw-src
     CGO_ENABLED=1 go build -ldflags="-s -w" -o /opt/pennyclaw/pennyclaw ./cmd/pennyclaw
     cd /opt/pennyclaw
-}
+fi
 
-chmod +x pennyclaw
+chmod +x /opt/pennyclaw/pennyclaw
+
+# Verify binary exists
+if [ ! -f /opt/pennyclaw/pennyclaw ]; then
+    echo "ERROR: PennyClaw binary not found at /opt/pennyclaw/pennyclaw"
+    echo "Contents of /opt/pennyclaw/:"
+    ls -la /opt/pennyclaw/
+    exit 1
+fi
 
 # Create default config if not exists
 if [ ! -f config.json ]; then
@@ -634,6 +648,7 @@ SERVICE
 
 # Create pennyclaw user
 useradd -r -s /bin/false pennyclaw 2>/dev/null || true
+mkdir -p /tmp/pennyclaw-sandbox
 chown -R pennyclaw:pennyclaw /opt/pennyclaw /tmp/pennyclaw-sandbox 2>/dev/null || true
 
 # Enable and start
