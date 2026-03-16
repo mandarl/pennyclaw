@@ -8,6 +8,7 @@ config.json
 .env
 
 # Database
+data/
 *.db
 *.db-journal
 *.db-wal
