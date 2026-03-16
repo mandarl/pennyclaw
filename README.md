@@ -82,6 +82,7 @@ docker run -p 3000:3000 \
 - **Persistent memory** — SQLite-backed conversation history that survives restarts
 - **Tool execution** — Sandboxed shell commands, file I/O, web search, HTTP requests
 - **Web chat UI** — Clean, embedded interface with zero external dependencies
+- **In-browser logs viewer** — Slide-out panel with color-coded log levels, auto-refresh, no SSH needed
 
 ### Deployment
 - **One-click GCP deploy** — Guided Cloud Shell tutorial with automated setup
