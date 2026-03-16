@@ -630,21 +630,27 @@ if [[ "${UPGRADE_MODE:-false}" == "true" ]]; then
     ok "Instance reset with updated PennyClaw"
 else
     info "Creating instance: ${INSTANCE_NAME}..."
-    gcloud compute instances create "$INSTANCE_NAME" \
-    --project="$PROJECT" \
-    --zone="$BEST_ZONE" \
-    --machine-type="$MACHINE_TYPE" \
-    --network-tier="$NETWORK_TIER" \
-    --image-family="$IMAGE_FAMILY" \
-    --image-project="$IMAGE_PROJECT" \
-    --boot-disk-size="${DISK_SIZE_GB}GB" \
-    --boot-disk-type="$DISK_TYPE" \
-    --metadata-from-file=startup-script="$STARTUP_SCRIPT_FILE" \
-    --tags=pennyclaw-server \
-    --scopes=default \
-    --no-restart-on-failure
-
-ok "Instance created: ${INSTANCE_NAME}"
+    info "(this takes 30-60 seconds)"
+    if run_with_spinner "Creating VM instance" gcloud compute instances create "$INSTANCE_NAME" \
+        --project="$PROJECT" \
+        --zone="$BEST_ZONE" \
+        --machine-type="$MACHINE_TYPE" \
+        --network-tier="$NETWORK_TIER" \
+        --image-family="$IMAGE_FAMILY" \
+        --image-project="$IMAGE_PROJECT" \
+        --boot-disk-size="${DISK_SIZE_GB}GB" \
+        --boot-disk-type="$DISK_TYPE" \
+        --metadata=VmDnsSetting=ZonalOnly \
+        --metadata-from-file=startup-script="$STARTUP_SCRIPT_FILE" \
+        --tags=pennyclaw-server \
+        --scopes=default \
+        --no-restart-on-failure; then
+        ok "Instance created: ${INSTANCE_NAME}"
+    else
+        fail "Failed to create instance. Check your GCP quotas and permissions."
+        info "Try running manually: gcloud compute instances create ${INSTANCE_NAME} --zone=${BEST_ZONE} --machine-type=${MACHINE_TYPE}"
+        exit 1
+    fi
 fi
 
 # Create firewall rule for web UI
