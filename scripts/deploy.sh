@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# PennyClaw Deployment Script v0.1.0
+# PennyClaw Deployment Script v0.1.1
 # Deploys PennyClaw to GCP's Always Free e2-micro instance with comprehensive
 # pre-flight validation to protect users from unexpected charges.
 #
@@ -13,7 +13,7 @@ set -euo pipefail
 # ============================================================================
 # Constants
 # ============================================================================
-VERSION="0.1.0"
+VERSION="0.1.1"
 INSTANCE_PREFIX="pennyclaw"
 MACHINE_TYPE="e2-micro"
 DISK_SIZE_GB=30
@@ -95,7 +95,7 @@ step "PHASE 1: GCP Account & Authentication"
 
 # Check 1: gcloud CLI installed
 if command -v gcloud &>/dev/null; then
-    GCLOUD_VERSION=$(gcloud version --format="value(Google Cloud SDK)" 2>/dev/null | head -1)
+    GCLOUD_VERSION=$(gcloud version --format="value(Google Cloud SDK)" 2>/dev/null | head -1 || echo "unknown")
     ok "gcloud CLI installed (${GCLOUD_VERSION})"
 else
     fail "gcloud CLI not found. Install: https://cloud.google.com/sdk/docs/install"
@@ -104,7 +104,7 @@ else
 fi
 
 # Check 2: Authenticated
-ACCOUNT=$(gcloud auth list --filter=status:ACTIVE --format="value(account)" 2>/dev/null | head -1)
+ACCOUNT=$(gcloud auth list --filter=status:ACTIVE --format="value(account)" 2>/dev/null | head -1 || echo "")
 if [[ -n "$ACCOUNT" ]]; then
     ok "Authenticated as: ${ACCOUNT}"
 else
@@ -113,7 +113,7 @@ else
 fi
 
 # Check 3: Project selected
-PROJECT=$(gcloud config get-value project 2>/dev/null)
+PROJECT=$(gcloud config get-value project 2>/dev/null || echo "")
 if [[ -n "$PROJECT" && "$PROJECT" != "(unset)" ]]; then
     ok "Project: ${PROJECT}"
 else
@@ -122,22 +122,30 @@ else
 fi
 
 # Check 4: Billing enabled
-BILLING_ENABLED=$(gcloud billing projects describe "$PROJECT" --format="value(billingEnabled)" 2>/dev/null || echo "false")
+BILLING_ENABLED="false"
+if gcloud billing projects describe "$PROJECT" --format="value(billingEnabled)" &>/dev/null; then
+    BILLING_ENABLED=$(gcloud billing projects describe "$PROJECT" --format="value(billingEnabled)" 2>/dev/null || echo "false")
+fi
 if [[ "$BILLING_ENABLED" == "True" ]]; then
     ok "Billing is enabled (required even for free tier)"
 else
-    warn "Billing not enabled. Free tier requires a billing account."
-    info "Enable at: https://console.cloud.google.com/billing/linkedaccount?project=${PROJECT}"
+    warn "Could not verify billing status (may need billing.projects.get permission)."
+    warn "Free tier requires a billing account. Verify at:"
+    info "https://console.cloud.google.com/billing/linkedaccount?project=${PROJECT}"
 fi
 
 # Check 5: Compute Engine API
-COMPUTE_API=$(gcloud services list --enabled --filter="name:compute.googleapis.com" --format="value(name)" 2>/dev/null)
+COMPUTE_API=$(gcloud services list --enabled --filter="name:compute.googleapis.com" --format="value(name)" 2>/dev/null || echo "")
 if [[ -n "$COMPUTE_API" ]]; then
     ok "Compute Engine API is enabled"
 else
     info "Enabling Compute Engine API..."
-    gcloud services enable compute.googleapis.com --project="$PROJECT" 2>/dev/null
-    ok "Compute Engine API enabled"
+    if gcloud services enable compute.googleapis.com --project="$PROJECT" 2>/dev/null; then
+        ok "Compute Engine API enabled"
+    else
+        fail "Could not enable Compute Engine API. Enable it manually:"
+        info "https://console.cloud.google.com/apis/library/compute.googleapis.com?project=${PROJECT}"
+    fi
 fi
 
 # ============================================================================
@@ -147,7 +155,7 @@ step "PHASE 2: Free Tier Eligibility"
 EXISTING_MICROS=$(gcloud compute instances list \
     --filter="machineType~e2-micro AND status=RUNNING" \
     --format="value(name,zone)" \
-    --project="$PROJECT" 2>/dev/null)
+    --project="$PROJECT" 2>/dev/null || echo "")
 
 if [[ -z "$EXISTING_MICROS" ]]; then
     ok "No existing e2-micro instances found — you're eligible for the free tier!"
@@ -171,7 +179,7 @@ fi
 # Check 7: Existing instances of any type
 ALL_INSTANCES=$(gcloud compute instances list \
     --format="table[no-heading](name,machineType.basename(),zone.basename(),status)" \
-    --project="$PROJECT" 2>/dev/null)
+    --project="$PROJECT" 2>/dev/null || echo "")
 if [[ -n "$ALL_INSTANCES" ]]; then
     INSTANCE_COUNT=$(echo "$ALL_INSTANCES" | wc -l)
     warn "Found ${INSTANCE_COUNT} total instance(s) in this project:"
@@ -186,7 +194,7 @@ fi
 EXISTING_PC=$(gcloud compute instances list \
     --filter="name~${INSTANCE_PREFIX}" \
     --format="value(name,zone,status)" \
-    --project="$PROJECT" 2>/dev/null)
+    --project="$PROJECT" 2>/dev/null || echo "")
 if [[ -n "$EXISTING_PC" ]]; then
     warn "Existing PennyClaw instance found: ${EXISTING_PC}"
     ask "Upgrade existing instance instead of creating new? (Y/n)"
@@ -201,7 +209,8 @@ fi
 # Check 9: Disk usage
 TOTAL_DISK_GB=$(gcloud compute disks list \
     --format="value(sizeGb)" \
-    --project="$PROJECT" 2>/dev/null | paste -sd+ | bc 2>/dev/null || echo "0")
+    --project="$PROJECT" 2>/dev/null | paste -sd+ 2>/dev/null | bc 2>/dev/null || echo "0")
+TOTAL_DISK_GB=${TOTAL_DISK_GB:-0}
 REMAINING_DISK=$((30 - TOTAL_DISK_GB))
 if [[ $TOTAL_DISK_GB -eq 0 ]]; then
     ok "No existing disks — full 30GB free tier available"
@@ -370,16 +379,27 @@ apt-get install -y -qq curl sqlite3 unattended-upgrades
 dpkg-reconfigure -plow unattended-upgrades
 
 # Download PennyClaw binary
-PENNYCLAW_VERSION="0.1.0"
+PENNYCLAW_VERSION="0.1.1"
 echo "Downloading PennyClaw v${PENNYCLAW_VERSION}..."
 mkdir -p /opt/pennyclaw/data
 cd /opt/pennyclaw
 
-# Download from GitHub releases (placeholder URL)
-curl -fsSL "https://github.com/mandarl/pennyclaw/releases/download/v${PENNYCLAW_VERSION}/pennyclaw-linux-amd64" \
-    -o pennyclaw || {
+# Detect architecture
+ARCH=$(uname -m)
+case "$ARCH" in
+    x86_64)  ARCH_SUFFIX="amd64" ;;
+    aarch64) ARCH_SUFFIX="arm64" ;;
+    *)       ARCH_SUFFIX="amd64" ;;
+esac
+
+# Download from GitHub releases
+TARBALL="pennyclaw-linux-${ARCH_SUFFIX}.tar.gz"
+curl -fsSL "https://github.com/mandarl/pennyclaw/releases/download/v${PENNYCLAW_VERSION}/${TARBALL}" \
+    -o "/tmp/${TARBALL}" && \
+    tar -xzf "/tmp/${TARBALL}" -C /opt/pennyclaw/ && \
+    rm -f "/tmp/${TARBALL}" || {
     echo "Download failed. Building from source..."
-    apt-get install -y -qq golang-go gcc
+    apt-get install -y -qq golang-go gcc libsqlite3-dev
     git clone https://github.com/mandarl/pennyclaw.git /tmp/pennyclaw-src
     cd /tmp/pennyclaw-src
     CGO_ENABLED=1 go build -ldflags="-s -w" -o /opt/pennyclaw/pennyclaw ./cmd/pennyclaw
