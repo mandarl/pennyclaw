@@ -43,6 +43,10 @@ type LLMConfig struct {
 	BaseURL     string `json:"base_url"`     // Optional: custom base URL for OpenAI-compatible endpoints
 	MaxTokens   int    `json:"max_tokens"`   // Max tokens per response
 	Temperature float64 `json:"temperature"` // Sampling temperature
+
+	// OriginalAPIKey stores the raw config value (e.g., "$OPENAI_API_KEY") before
+	// env var resolution, so we can preserve it when saving config back to disk.
+	OriginalAPIKey string `json:"-"`
 }
 
 // ChannelsConfig holds messaging channel settings.
@@ -99,6 +103,9 @@ func Load(path string) (*Config, error) {
 	if err := json.Unmarshal(data, cfg); err != nil {
 		return nil, fmt.Errorf("parsing config file: %w", err)
 	}
+
+	// Preserve original values before env var resolution
+	cfg.LLM.OriginalAPIKey = cfg.LLM.APIKey
 
 	// Resolve environment variable references in sensitive fields
 	cfg.LLM.APIKey = resolveEnvVar(cfg.LLM.APIKey)

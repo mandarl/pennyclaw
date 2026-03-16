@@ -6,12 +6,19 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log"
 	"net/http"
 	"os"
+	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/creativeprojects/go-selfupdate"
+	"github.com/mandarl/pennyclaw/internal/config"
+	"github.com/mandarl/pennyclaw/internal/memory"
 )
 
 // MessageHandler is the function signature for processing messages.
@@ -67,15 +74,50 @@ func (lb *logBuffer) recent(n int) []logEntry {
 	return result
 }
 
+// TokenUsage tracks cumulative token usage across the session.
+type TokenUsage struct {
+	mu               sync.Mutex
+	TotalPrompt      int `json:"total_prompt"`
+	TotalCompletion  int `json:"total_completion"`
+	TotalTokens      int `json:"total_tokens"`
+	RequestCount     int `json:"request_count"`
+}
+
+func (t *TokenUsage) Add(prompt, completion int) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	t.TotalPrompt += prompt
+	t.TotalCompletion += completion
+	t.TotalTokens += prompt + completion
+	t.RequestCount++
+}
+
+func (t *TokenUsage) Snapshot() map[string]int {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	return map[string]int{
+		"total_prompt":     t.TotalPrompt,
+		"total_completion": t.TotalCompletion,
+		"total_tokens":     t.TotalTokens,
+		"request_count":    t.RequestCount,
+	}
+}
+
 // Server is the web UI HTTP server.
 type Server struct {
-	host      string
-	port      int
-	handler   MessageHandler
-	srv       *http.Server
-	authToken string
-	limiter   *rateLimiter
-	logs      *logBuffer
+	host       string
+	port       int
+	handler    MessageHandler
+	srv        *http.Server
+	authToken  string
+	limiter    *rateLimiter
+	logs       *logBuffer
+	tokens     *TokenUsage
+	cfg        *config.Config
+	cfgPath    string
+	memory     *memory.Store
+	version    string
+	uploadDir  string
 }
 
 // rateLimiter implements a simple per-IP token bucket rate limiter.
@@ -124,16 +166,23 @@ func (s *Server) logf(level, format string, args ...interface{}) {
 }
 
 // NewServer creates a new web UI server.
-// If PENNYCLAW_AUTH_TOKEN is set, requests to /api/chat require
-// the token as a Bearer token or ?token= query parameter.
-func NewServer(host string, port int, handler MessageHandler) *Server {
+func NewServer(host string, port int, handler MessageHandler, cfg *config.Config, cfgPath string, mem *memory.Store, version string) *Server {
 	s := &Server{
 		host:    host,
 		port:    port,
 		handler: handler,
 		limiter: newRateLimiter(20, time.Minute),
 		logs:    newLogBuffer(200),
+		tokens:  &TokenUsage{},
+		cfg:     cfg,
+		cfgPath: cfgPath,
+		memory:  mem,
+		version: version,
 	}
+
+	// Set up upload directory
+	s.uploadDir = filepath.Join(cfg.Sandbox.WorkDir, "uploads")
+	os.MkdirAll(s.uploadDir, 0755)
 
 	token := os.Getenv("PENNYCLAW_AUTH_TOKEN")
 	if token == "" {
@@ -151,11 +200,22 @@ func NewServer(host string, port int, handler MessageHandler) *Server {
 func (s *Server) Start() error {
 	mux := http.NewServeMux()
 
+	// Existing endpoints
 	mux.HandleFunc("/", s.handleIndex)
 	mux.HandleFunc("/api/chat", s.handleChat)
 	mux.HandleFunc("/api/health", s.handleHealth)
 	mux.HandleFunc("/api/auth/check", s.handleAuthCheck)
 	mux.HandleFunc("/api/logs", s.handleLogs)
+
+	// New endpoints
+	mux.HandleFunc("/api/settings", s.handleSettings)
+	mux.HandleFunc("/api/sessions", s.handleSessions)
+	mux.HandleFunc("/api/sessions/", s.handleSessionByID)
+	mux.HandleFunc("/api/tokens", s.handleTokenUsage)
+	mux.HandleFunc("/api/version", s.handleVersion)
+	mux.HandleFunc("/api/upgrade", s.handleUpgrade)
+	mux.HandleFunc("/api/upload", s.handleUpload)
+	mux.HandleFunc("/api/export", s.handleExport)
 
 	s.srv = &http.Server{
 		Addr:         fmt.Sprintf("%s:%d", s.host, s.port),
@@ -178,17 +238,27 @@ func (s *Server) Stop() {
 	}
 }
 
+// requireAuth checks authentication and returns false if unauthorized.
+func (s *Server) requireAuth(w http.ResponseWriter, r *http.Request) bool {
+	if s.authToken == "" {
+		return true
+	}
+	token := extractToken(r)
+	if token != s.authToken {
+		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+		return false
+	}
+	return true
+}
+
 func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
 	json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
 }
 
-// handleAuthCheck lets the frontend check whether auth is required
-// and whether a provided token is valid.
 func (s *Server) handleAuthCheck(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
-
 	if s.authToken == "" {
 		json.NewEncoder(w).Encode(map[string]interface{}{
 			"auth_required": false,
@@ -196,7 +266,6 @@ func (s *Server) handleAuthCheck(w http.ResponseWriter, r *http.Request) {
 		})
 		return
 	}
-
 	token := extractToken(r)
 	json.NewEncoder(w).Encode(map[string]interface{}{
 		"auth_required": true,
@@ -204,22 +273,425 @@ func (s *Server) handleAuthCheck(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// handleLogs returns recent log entries. Auth-protected.
 func (s *Server) handleLogs(w http.ResponseWriter, r *http.Request) {
-	if s.authToken != "" {
-		token := extractToken(r)
-		if token != s.authToken {
-			http.Error(w, "Unauthorized", http.StatusUnauthorized)
+	if !s.requireAuth(w, r) {
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	entries := s.logs.recent(200)
+	json.NewEncoder(w).Encode(map[string]interface{}{"logs": entries})
+}
+
+// --- Settings API ---
+
+type settingsResponse struct {
+	Provider     string  `json:"provider"`
+	Model        string  `json:"model"`
+	APIKey       string  `json:"api_key"`
+	BaseURL      string  `json:"base_url"`
+	MaxTokens    int     `json:"max_tokens"`
+	Temperature  float64 `json:"temperature"`
+	SystemPrompt string  `json:"system_prompt"`
+}
+
+func maskKey(key string) string {
+	if len(key) <= 8 {
+		return "****"
+	}
+	return key[:4] + "..." + key[len(key)-4:]
+}
+
+func (s *Server) handleSettings(w http.ResponseWriter, r *http.Request) {
+	if !s.requireAuth(w, r) {
+		return
+	}
+
+	switch r.Method {
+	case http.MethodGet:
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(settingsResponse{
+			Provider:     s.cfg.LLM.Provider,
+			Model:        s.cfg.LLM.Model,
+			APIKey:       maskKey(s.cfg.LLM.APIKey),
+			BaseURL:      s.cfg.LLM.BaseURL,
+			MaxTokens:    s.cfg.LLM.MaxTokens,
+			Temperature:  s.cfg.LLM.Temperature,
+			SystemPrompt: s.cfg.SystemPrompt,
+		})
+
+	case http.MethodPut:
+		var update struct {
+			Provider     *string  `json:"provider"`
+			Model        *string  `json:"model"`
+			APIKey       *string  `json:"api_key"`
+			BaseURL      *string  `json:"base_url"`
+			MaxTokens    *int     `json:"max_tokens"`
+			Temperature  *float64 `json:"temperature"`
+			SystemPrompt *string  `json:"system_prompt"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&update); err != nil {
+			http.Error(w, "Invalid JSON", http.StatusBadRequest)
 			return
 		}
+
+		if update.Provider != nil {
+			s.cfg.LLM.Provider = *update.Provider
+		}
+		if update.Model != nil {
+			s.cfg.LLM.Model = *update.Model
+		}
+		if update.APIKey != nil && *update.APIKey != "" && !strings.Contains(*update.APIKey, "...") {
+			s.cfg.LLM.APIKey = *update.APIKey
+			// User explicitly set a new key, so clear the env var reference
+			s.cfg.LLM.OriginalAPIKey = *update.APIKey
+		}
+		if update.BaseURL != nil {
+			s.cfg.LLM.BaseURL = *update.BaseURL
+		}
+		if update.MaxTokens != nil && *update.MaxTokens > 0 {
+			s.cfg.LLM.MaxTokens = *update.MaxTokens
+		}
+		if update.Temperature != nil && *update.Temperature >= 0 && *update.Temperature <= 2 {
+			s.cfg.LLM.Temperature = *update.Temperature
+		}
+		if update.SystemPrompt != nil {
+			s.cfg.SystemPrompt = *update.SystemPrompt
+		}
+
+		if err := s.saveConfig(); err != nil {
+			s.logf("ERROR", "Failed to save config: %v", err)
+			http.Error(w, "Failed to save config", http.StatusInternalServerError)
+			return
+		}
+
+		s.logf("INFO", "Settings updated via web UI")
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]string{
+			"status":  "ok",
+			"message": "Settings saved. Some changes (provider, API key) require a restart to take effect.",
+		})
+
+	default:
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+	}
+}
+
+func (s *Server) saveConfig() error {
+	// Create a copy of the config for serialization so we can swap in
+	// the original API key reference (e.g., "$OPENAI_API_KEY") instead
+	// of the resolved plaintext key.
+	cfgCopy := *s.cfg
+	llmCopy := cfgCopy.LLM
+	if llmCopy.OriginalAPIKey != "" && strings.HasPrefix(llmCopy.OriginalAPIKey, "$") {
+		// Preserve the env var reference in the saved file
+		llmCopy.APIKey = llmCopy.OriginalAPIKey
+	}
+	cfgCopy.LLM = llmCopy
+
+	data, err := json.MarshalIndent(&cfgCopy, "", "  ")
+	if err != nil {
+		return fmt.Errorf("marshaling config: %w", err)
+	}
+	return os.WriteFile(s.cfgPath, data, 0600)
+}
+
+// --- Sessions API ---
+
+func (s *Server) handleSessions(w http.ResponseWriter, r *http.Request) {
+	if !s.requireAuth(w, r) {
+		return
+	}
+	if s.memory == nil {
+		http.Error(w, "Memory store not available", http.StatusServiceUnavailable)
+		return
+	}
+
+	switch r.Method {
+	case http.MethodGet:
+		sessions, err := s.memory.ListSessions()
+		if err != nil {
+			s.logf("ERROR", "Failed to list sessions: %v", err)
+			http.Error(w, "Internal error", http.StatusInternalServerError)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]interface{}{"sessions": sessions})
+	default:
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+	}
+}
+
+func (s *Server) handleSessionByID(w http.ResponseWriter, r *http.Request) {
+	if !s.requireAuth(w, r) {
+		return
+	}
+	if s.memory == nil {
+		http.Error(w, "Memory store not available", http.StatusServiceUnavailable)
+		return
+	}
+
+	sessionID := strings.TrimPrefix(r.URL.Path, "/api/sessions/")
+	if sessionID == "" {
+		http.Error(w, "Session ID required", http.StatusBadRequest)
+		return
+	}
+
+	switch r.Method {
+	case http.MethodGet:
+		messages, err := s.memory.GetHistory(sessionID)
+		if err != nil {
+			http.Error(w, "Internal error", http.StatusInternalServerError)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]interface{}{"messages": messages})
+
+	case http.MethodDelete:
+		if err := s.memory.DeleteSession(sessionID); err != nil {
+			http.Error(w, "Internal error", http.StatusInternalServerError)
+			return
+		}
+		s.logf("INFO", "Session %s deleted via web UI", sessionID)
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
+
+	default:
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+	}
+}
+
+// --- Token Usage API ---
+
+func (s *Server) handleTokenUsage(w http.ResponseWriter, r *http.Request) {
+	if !s.requireAuth(w, r) {
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	snap := s.tokens.Snapshot()
+	resp := map[string]interface{}{
+		"total_prompt":     snap["total_prompt"],
+		"total_completion": snap["total_completion"],
+		"total_tokens":     snap["total_tokens"],
+		"request_count":    snap["request_count"],
+	}
+	json.NewEncoder(w).Encode(resp)
+}
+
+// AddTokenUsage records token usage from an LLM response (called from agent).
+func (s *Server) AddTokenUsage(prompt, completion int) {
+	s.tokens.Add(prompt, completion)
+}
+
+// --- Version & Upgrade API ---
+
+// safeGreaterThan compares versions without panicking on non-semver strings like "dev".
+func safeGreaterThan(release *selfupdate.Release, currentVersion string) bool {
+	defer func() { recover() }() // semver.MustParse panics on invalid input
+	return release.GreaterThan(currentVersion)
+}
+
+func (s *Server) handleVersion(w http.ResponseWriter, r *http.Request) {
+	if !s.requireAuth(w, r) {
+		return
+	}
+
+	result := map[string]interface{}{
+		"current": s.version,
+		"os":      runtime.GOOS,
+		"arch":    runtime.GOARCH,
+	}
+
+	latest, found, err := selfupdate.DetectLatest(r.Context(), selfupdate.ParseSlug("mandarl/pennyclaw"))
+	if err != nil {
+		s.logf("WARN", "Failed to check for updates: %v", err)
+		result["error"] = "Failed to check for updates"
+	} else if found {
+		result["latest"] = latest.Version()
+		// If current version is "dev", always consider update available
+		if s.version == "dev" {
+			result["update_available"] = true
+		} else {
+			result["update_available"] = safeGreaterThan(latest, s.version)
+		}
+		result["published_at"] = latest.PublishedAt
+	} else {
+		result["latest"] = s.version
+		result["update_available"] = false
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	entries := s.logs.recent(200)
+	json.NewEncoder(w).Encode(result)
+}
+
+func (s *Server) handleUpgrade(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	if !s.requireAuth(w, r) {
+		return
+	}
+
+	s.logf("INFO", "Upgrade requested via web UI")
+
+	latest, found, err := selfupdate.DetectLatest(r.Context(), selfupdate.ParseSlug("mandarl/pennyclaw"))
+	if err != nil {
+		s.logf("ERROR", "Upgrade check failed: %v", err)
+		http.Error(w, fmt.Sprintf("Failed to check for updates: %v", err), http.StatusInternalServerError)
+		return
+	}
+	if !found {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]string{"status": "no_update", "message": "No releases found"})
+		return
+	}
+	if s.version != "dev" && !safeGreaterThan(latest, s.version) {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]string{"status": "up_to_date", "message": "Already running the latest version"})
+		return
+	}
+
+	exe, err := selfupdate.ExecutablePath()
+	if err != nil {
+		s.logf("ERROR", "Cannot find executable path: %v", err)
+		http.Error(w, "Cannot determine executable path", http.StatusInternalServerError)
+		return
+	}
+
+	s.logf("INFO", "Downloading update v%s -> v%s", s.version, latest.Version())
+
+	if err := selfupdate.UpdateTo(r.Context(), latest.AssetURL, latest.AssetName, exe); err != nil {
+		s.logf("ERROR", "Upgrade failed: %v", err)
+		http.Error(w, fmt.Sprintf("Upgrade failed: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	s.logf("INFO", "Upgrade to v%s complete! Restart required.", latest.Version())
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]string{
+		"status":  "upgraded",
+		"version": latest.Version(),
+		"message": fmt.Sprintf("Upgraded to v%s. The service will restart automatically if running under systemd.", latest.Version()),
+	})
+
+	// Signal systemd to restart us
+	go func() {
+		time.Sleep(1 * time.Second)
+		s.logf("INFO", "Sending SIGTERM to trigger restart...")
+		p, _ := os.FindProcess(os.Getpid())
+		p.Signal(os.Interrupt)
+	}()
+}
+
+// --- File Upload API ---
+
+func (s *Server) handleUpload(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	if !s.requireAuth(w, r) {
+		return
+	}
+
+	r.Body = http.MaxBytesReader(w, r.Body, 10<<20)
+	if err := r.ParseMultipartForm(10 << 20); err != nil {
+		http.Error(w, "File too large (max 10MB)", http.StatusBadRequest)
+		return
+	}
+
+	file, header, err := r.FormFile("file")
+	if err != nil {
+		http.Error(w, "No file provided", http.StatusBadRequest)
+		return
+	}
+	defer file.Close()
+
+	safeName := filepath.Base(header.Filename)
+	if safeName == "" || safeName == "." || safeName == ".." {
+		http.Error(w, "Invalid filename", http.StatusBadRequest)
+		return
+	}
+	destPath := filepath.Join(s.uploadDir, safeName)
+
+	dst, err := os.Create(destPath)
+	if err != nil {
+		s.logf("ERROR", "Failed to create upload file: %v", err)
+		http.Error(w, "Failed to save file", http.StatusInternalServerError)
+		return
+	}
+	defer dst.Close()
+
+	if _, err := io.Copy(dst, file); err != nil {
+		s.logf("ERROR", "Failed to write upload file: %v", err)
+		http.Error(w, "Failed to save file", http.StatusInternalServerError)
+		return
+	}
+
+	s.logf("INFO", "File uploaded: %s (%d bytes)", safeName, header.Size)
+	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]interface{}{
-		"logs": entries,
+		"status":   "ok",
+		"filename": safeName,
+		"size":     header.Size,
+		"path":     destPath,
 	})
 }
+
+// --- Export Chat API ---
+
+func (s *Server) handleExport(w http.ResponseWriter, r *http.Request) {
+	if !s.requireAuth(w, r) {
+		return
+	}
+
+	sessionID := r.URL.Query().Get("session_id")
+	if sessionID == "" {
+		http.Error(w, "session_id required", http.StatusBadRequest)
+		return
+	}
+
+	format := r.URL.Query().Get("format")
+	if format == "" {
+		format = "markdown"
+	}
+
+	messages, err := s.memory.GetHistory(sessionID)
+	if err != nil {
+		http.Error(w, "Failed to retrieve messages", http.StatusInternalServerError)
+		return
+	}
+
+	var content strings.Builder
+	switch format {
+	case "markdown":
+		content.WriteString(fmt.Sprintf("# PennyClaw Chat Export\n\nSession: %s\nExported: %s\n\n---\n\n", sessionID, time.Now().Format(time.RFC3339)))
+		for _, m := range messages {
+			role := strings.ToUpper(m.Role[:1]) + m.Role[1:]
+			content.WriteString(fmt.Sprintf("### %s\n\n%s\n\n", role, m.Content))
+		}
+	case "json":
+		data, _ := json.MarshalIndent(messages, "", "  ")
+		content.Write(data)
+	default:
+		for _, m := range messages {
+			content.WriteString(fmt.Sprintf("[%s] %s\n\n", m.Role, m.Content))
+		}
+	}
+
+	ext := "md"
+	if format == "json" {
+		ext = "json"
+	} else if format == "text" {
+		ext = "txt"
+	}
+
+	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+	w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=\"pennyclaw-chat-%s.%s\"", sessionID, ext))
+	w.Write([]byte(content.String()))
+}
+
+// --- Chat handler ---
 
 type chatRequest struct {
 	Message   string `json:"message"`
@@ -246,12 +718,8 @@ func (s *Server) handleChat(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if s.authToken != "" {
-		token := extractToken(r)
-		if token != s.authToken {
-			http.Error(w, "Unauthorized", http.StatusUnauthorized)
-			return
-		}
+	if !s.requireAuth(w, r) {
+		return
 	}
 
 	var req chatRequest
@@ -302,409 +770,3 @@ func truncateLog(s string, maxLen int) string {
 	return s[:maxLen] + "..."
 }
 
-// indexHTML is the embedded web chat UI — a single self-contained HTML page.
-// No external dependencies, no CDN, no build step. Just HTML + CSS + vanilla JS.
-// Includes a login screen when PENNYCLAW_AUTH_TOKEN is set and a logs panel.
-const indexHTML = `<!DOCTYPE html>
-<html lang="en">
-<head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>PennyClaw</title>
-<style>
-  * { margin: 0; padding: 0; box-sizing: border-box; }
-  body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #0a0a0a; color: #e0e0e0; height: 100vh; display: flex; flex-direction: column; }
-
-  /* Login overlay */
-  .login-overlay { position: fixed; inset: 0; background: #0a0a0a; display: flex; align-items: center; justify-content: center; z-index: 100; }
-  .login-box { background: #111; border: 1px solid #222; border-radius: 12px; padding: 40px; max-width: 380px; width: 90%; text-align: center; }
-  .login-box .logo { font-size: 32px; font-weight: 700; color: #f5a623; margin-bottom: 8px; }
-  .login-box .tagline { font-size: 14px; color: #666; margin-bottom: 28px; }
-  .login-box label { display: block; text-align: left; font-size: 13px; color: #999; margin-bottom: 6px; }
-  .login-box input { width: 100%; background: #1a1a1a; border: 1px solid #333; border-radius: 8px; padding: 12px 16px; color: #e0e0e0; font-size: 14px; font-family: 'SF Mono', 'Fira Code', monospace; outline: none; margin-bottom: 16px; }
-  .login-box input:focus { border-color: #f5a623; }
-  .login-box button { width: 100%; background: #f5a623; color: #000; border: none; border-radius: 8px; padding: 12px; font-size: 14px; font-weight: 600; cursor: pointer; transition: opacity 0.2s; }
-  .login-box button:hover { opacity: 0.85; }
-  .login-box button:disabled { opacity: 0.4; cursor: not-allowed; }
-  .login-error { color: #ef4444; font-size: 13px; margin-bottom: 12px; min-height: 20px; }
-  .login-hint { font-size: 12px; color: #555; margin-top: 16px; line-height: 1.5; }
-  .login-hint code { background: #2a2a2a; padding: 2px 6px; border-radius: 4px; font-size: 11px; }
-
-  /* Chat UI */
-  .header { padding: 16px 24px; background: #111; border-bottom: 1px solid #222; display: flex; align-items: center; gap: 12px; }
-  .header .logo { font-size: 20px; font-weight: 700; color: #f5a623; }
-  .header .subtitle { font-size: 13px; color: #666; }
-  .header .status { margin-left: auto; font-size: 12px; color: #4caf50; display: flex; align-items: center; gap: 6px; }
-  .header .status::before { content: ''; width: 8px; height: 8px; background: #4caf50; border-radius: 50%; }
-  .header-btns { display: flex; gap: 8px; }
-  .header .hdr-btn { background: none; border: 1px solid #333; border-radius: 6px; padding: 4px 12px; color: #999; font-size: 12px; cursor: pointer; transition: all 0.2s; }
-  .header .hdr-btn:hover { border-color: #f5a623; color: #f5a623; }
-  .header .hdr-btn.active { border-color: #f5a623; color: #f5a623; background: rgba(245,166,35,0.1); }
-  .header .hdr-btn.logout:hover { border-color: #ef4444; color: #ef4444; }
-  .chat { flex: 1; overflow-y: auto; padding: 24px; display: flex; flex-direction: column; gap: 16px; }
-  .msg { max-width: 80%; padding: 12px 16px; border-radius: 12px; line-height: 1.5; font-size: 14px; white-space: pre-wrap; word-wrap: break-word; }
-  .msg.user { align-self: flex-end; background: #1a3a5c; color: #e0e0e0; border-bottom-right-radius: 4px; }
-  .msg.assistant { align-self: flex-start; background: #1a1a1a; border: 1px solid #333; border-bottom-left-radius: 4px; }
-  .msg.system { align-self: center; background: transparent; color: #666; font-size: 12px; font-style: italic; }
-  .input-area { padding: 16px 24px; background: #111; border-top: 1px solid #222; display: flex; gap: 12px; }
-  .input-area textarea { flex: 1; background: #1a1a1a; border: 1px solid #333; border-radius: 8px; padding: 12px 16px; color: #e0e0e0; font-size: 14px; font-family: inherit; resize: none; outline: none; min-height: 44px; max-height: 120px; }
-  .input-area textarea:focus { border-color: #f5a623; }
-  .input-area button { background: #f5a623; color: #000; border: none; border-radius: 8px; padding: 0 20px; font-size: 14px; font-weight: 600; cursor: pointer; transition: opacity 0.2s; }
-  .input-area button:hover { opacity: 0.85; }
-  .input-area button:disabled { opacity: 0.4; cursor: not-allowed; }
-  .typing { display: flex; gap: 4px; padding: 4px 0; }
-  .typing span { width: 6px; height: 6px; background: #666; border-radius: 50%; animation: bounce 1.4s infinite; }
-  .typing span:nth-child(2) { animation-delay: 0.2s; }
-  .typing span:nth-child(3) { animation-delay: 0.4s; }
-  @keyframes bounce { 0%, 80%, 100% { transform: translateY(0); } 40% { transform: translateY(-8px); } }
-  .welcome { text-align: center; padding: 60px 24px; }
-  .welcome h2 { color: #f5a623; margin-bottom: 8px; }
-  .welcome p { color: #666; font-size: 14px; max-width: 400px; margin: 0 auto; }
-  code { background: #2a2a2a; padding: 2px 6px; border-radius: 4px; font-size: 13px; }
-  pre { background: #1a1a1a; padding: 12px; border-radius: 8px; overflow-x: auto; margin: 8px 0; }
-  pre code { background: none; padding: 0; }
-  .hidden { display: none !important; }
-
-  /* Logs panel */
-  .logs-panel { position: fixed; top: 0; right: -480px; width: 480px; height: 100vh; background: #0d0d0d; border-left: 1px solid #222; z-index: 50; display: flex; flex-direction: column; transition: right 0.25s ease; }
-  .logs-panel.open { right: 0; }
-  .logs-header { padding: 16px 20px; background: #111; border-bottom: 1px solid #222; display: flex; align-items: center; justify-content: space-between; }
-  .logs-header h3 { font-size: 14px; font-weight: 600; color: #e0e0e0; }
-  .logs-header-btns { display: flex; gap: 8px; }
-  .logs-header button { background: none; border: 1px solid #333; border-radius: 6px; padding: 4px 10px; color: #999; font-size: 11px; cursor: pointer; transition: all 0.2s; }
-  .logs-header button:hover { border-color: #f5a623; color: #f5a623; }
-  .logs-content { flex: 1; overflow-y: auto; padding: 12px 16px; font-family: 'SF Mono', 'Fira Code', 'Cascadia Code', monospace; font-size: 12px; line-height: 1.7; }
-  .logs-content::-webkit-scrollbar { width: 6px; }
-  .logs-content::-webkit-scrollbar-track { background: transparent; }
-  .logs-content::-webkit-scrollbar-thumb { background: #333; border-radius: 3px; }
-  .log-line { padding: 2px 0; border-bottom: 1px solid rgba(255,255,255,0.03); }
-  .log-ts { color: #555; margin-right: 8px; }
-  .log-level { font-weight: 600; margin-right: 8px; }
-  .log-level.INFO { color: #4caf50; }
-  .log-level.WARN { color: #f5a623; }
-  .log-level.ERROR { color: #ef4444; }
-  .log-level.DEBUG { color: #666; }
-  .log-msg { color: #ccc; }
-  .logs-empty { color: #555; text-align: center; padding: 40px 20px; font-family: -apple-system, BlinkMacSystemFont, sans-serif; font-size: 13px; }
-  .logs-status { padding: 8px 16px; background: #111; border-top: 1px solid #222; font-size: 11px; color: #555; display: flex; align-items: center; justify-content: space-between; }
-  .logs-status .auto-refresh { display: flex; align-items: center; gap: 6px; }
-  .logs-status .auto-refresh input { accent-color: #f5a623; }
-
-  /* Backdrop for mobile */
-  .logs-backdrop { position: fixed; inset: 0; background: rgba(0,0,0,0.5); z-index: 49; opacity: 0; pointer-events: none; transition: opacity 0.25s ease; }
-  .logs-backdrop.open { opacity: 1; pointer-events: auto; }
-
-  @media (max-width: 600px) {
-    .logs-panel { width: 100%; right: -100%; }
-  }
-</style>
-</head>
-<body>
-
-<!-- Login overlay (shown when auth is required) -->
-<div class="login-overlay" id="loginOverlay">
-  <div class="login-box">
-    <div class="logo">&#x1fa99; PennyClaw</div>
-    <div class="tagline">$0/month AI agent on GCP free tier</div>
-    <div id="loginLoading" style="color: #666; font-size: 13px;">Checking authentication...</div>
-    <div id="loginForm" class="hidden">
-      <label for="tokenInput">Authentication Token</label>
-      <input type="password" id="tokenInput" placeholder="Enter your PENNYCLAW_AUTH_TOKEN" autocomplete="off" />
-      <div class="login-error" id="loginError"></div>
-      <button id="loginBtn" onclick="doLogin()">Sign In</button>
-      <div class="login-hint">
-        This is the value of your <code>PENNYCLAW_AUTH_TOKEN</code> environment variable.
-      </div>
-    </div>
-  </div>
-</div>
-
-<!-- Chat UI -->
-<div class="header">
-  <div class="logo">&#x1fa99; PennyClaw</div>
-  <div class="subtitle">v0.1.1</div>
-  <div class="status">Online</div>
-  <div class="header-btns">
-    <button class="hdr-btn" id="logsBtn" onclick="toggleLogs()" title="View application logs">Logs</button>
-    <button class="hdr-btn logout hidden" id="logoutBtn" onclick="doLogout()">Sign Out</button>
-  </div>
-</div>
-<div class="chat" id="chat">
-  <div class="welcome">
-    <h2>Welcome to PennyClaw</h2>
-    <p>Your $0/month personal AI agent, running on GCP's free tier. Type a message to get started.</p>
-  </div>
-</div>
-<div class="input-area">
-  <textarea id="input" placeholder="Type a message..." rows="1"></textarea>
-  <button id="send" onclick="sendMessage()">Send</button>
-</div>
-
-<!-- Logs panel (slide-out from right) -->
-<div class="logs-backdrop" id="logsBackdrop" onclick="toggleLogs()"></div>
-<div class="logs-panel" id="logsPanel">
-  <div class="logs-header">
-    <h3>Application Logs</h3>
-    <div class="logs-header-btns">
-      <button onclick="fetchLogs()">Refresh</button>
-      <button onclick="toggleLogs()">Close</button>
-    </div>
-  </div>
-  <div class="logs-content" id="logsContent">
-    <div class="logs-empty">Loading logs...</div>
-  </div>
-  <div class="logs-status">
-    <span id="logsCount">0 entries</span>
-    <div class="auto-refresh">
-      <input type="checkbox" id="autoRefresh" checked />
-      <label for="autoRefresh" style="cursor:pointer;">Auto-refresh (5s)</label>
-    </div>
-  </div>
-</div>
-
-<script>
-const chat = document.getElementById('chat');
-const input = document.getElementById('input');
-const sendBtn = document.getElementById('send');
-const loginOverlay = document.getElementById('loginOverlay');
-const loginForm = document.getElementById('loginForm');
-const loginLoading = document.getElementById('loginLoading');
-const loginError = document.getElementById('loginError');
-const tokenInput = document.getElementById('tokenInput');
-const logoutBtn = document.getElementById('logoutBtn');
-const logsPanel = document.getElementById('logsPanel');
-const logsBackdrop = document.getElementById('logsBackdrop');
-const logsContent = document.getElementById('logsContent');
-const logsCount = document.getElementById('logsCount');
-const logsBtn = document.getElementById('logsBtn');
-const autoRefreshCheckbox = document.getElementById('autoRefresh');
-
-let sessionId = 'web-' + Date.now();
-let isWelcome = true;
-let authToken = localStorage.getItem('pennyclaw_token') || '';
-let logsOpen = false;
-let logsInterval = null;
-
-// Check if auth is required on page load
-(async function checkAuth() {
-  try {
-    const headers = {};
-    if (authToken) headers['Authorization'] = 'Bearer ' + authToken;
-    const res = await fetch('/api/auth/check', { headers });
-    const data = await res.json();
-
-    if (!data.auth_required) {
-      loginOverlay.classList.add('hidden');
-      input.focus();
-      return;
-    }
-
-    if (data.valid && authToken) {
-      loginOverlay.classList.add('hidden');
-      logoutBtn.classList.remove('hidden');
-      input.focus();
-      return;
-    }
-
-    localStorage.removeItem('pennyclaw_token');
-    authToken = '';
-    loginLoading.classList.add('hidden');
-    loginForm.classList.remove('hidden');
-    tokenInput.focus();
-  } catch (err) {
-    loginLoading.textContent = 'Cannot reach PennyClaw. Is it running?';
-  }
-})();
-
-tokenInput.addEventListener('keydown', (e) => {
-  if (e.key === 'Enter') { e.preventDefault(); doLogin(); }
-});
-
-async function doLogin() {
-  const token = tokenInput.value.trim();
-  if (!token) { loginError.textContent = 'Please enter a token.'; return; }
-
-  loginError.textContent = '';
-  document.getElementById('loginBtn').disabled = true;
-
-  try {
-    const res = await fetch('/api/auth/check', {
-      headers: { 'Authorization': 'Bearer ' + token }
-    });
-    const data = await res.json();
-
-    if (data.valid) {
-      authToken = token;
-      localStorage.setItem('pennyclaw_token', token);
-      loginOverlay.classList.add('hidden');
-      logoutBtn.classList.remove('hidden');
-      input.focus();
-    } else {
-      loginError.textContent = 'Invalid token. Check your PENNYCLAW_AUTH_TOKEN value.';
-    }
-  } catch (err) {
-    loginError.textContent = 'Connection error. Is PennyClaw running?';
-  }
-  document.getElementById('loginBtn').disabled = false;
-}
-
-function doLogout() {
-  authToken = '';
-  localStorage.removeItem('pennyclaw_token');
-  location.reload();
-}
-
-// --- Logs panel ---
-function toggleLogs() {
-  logsOpen = !logsOpen;
-  logsPanel.classList.toggle('open', logsOpen);
-  logsBackdrop.classList.toggle('open', logsOpen);
-  logsBtn.classList.toggle('active', logsOpen);
-
-  if (logsOpen) {
-    fetchLogs();
-    startAutoRefresh();
-  } else {
-    stopAutoRefresh();
-  }
-}
-
-function startAutoRefresh() {
-  stopAutoRefresh();
-  if (autoRefreshCheckbox.checked) {
-    logsInterval = setInterval(fetchLogs, 5000);
-  }
-}
-
-function stopAutoRefresh() {
-  if (logsInterval) {
-    clearInterval(logsInterval);
-    logsInterval = null;
-  }
-}
-
-autoRefreshCheckbox.addEventListener('change', () => {
-  if (logsOpen) {
-    if (autoRefreshCheckbox.checked) startAutoRefresh();
-    else stopAutoRefresh();
-  }
-});
-
-async function fetchLogs() {
-  try {
-    const headers = {};
-    if (authToken) headers['Authorization'] = 'Bearer ' + authToken;
-    const res = await fetch('/api/logs', { headers });
-
-    if (res.status === 401) {
-      logsContent.innerHTML = '<div class="logs-empty">Authentication required. Please sign in.</div>';
-      return;
-    }
-
-    const data = await res.json();
-    const logs = data.logs || [];
-
-    if (logs.length === 0) {
-      logsContent.innerHTML = '<div class="logs-empty">No log entries yet. Interact with PennyClaw to generate logs.</div>';
-      logsCount.textContent = '0 entries';
-      return;
-    }
-
-    const wasAtBottom = logsContent.scrollTop + logsContent.clientHeight >= logsContent.scrollHeight - 20;
-
-    logsContent.innerHTML = logs.map(function(entry) {
-      const ts = entry.timestamp.replace('T', ' ').replace('Z', '');
-      const shortTs = ts.substring(11, 19);
-      return '<div class="log-line">' +
-        '<span class="log-ts">' + shortTs + '</span>' +
-        '<span class="log-level ' + entry.level + '">' + entry.level.padEnd(5) + '</span>' +
-        '<span class="log-msg">' + escapeHtml(entry.message) + '</span>' +
-        '</div>';
-    }).join('');
-
-    logsCount.textContent = logs.length + ' entries';
-
-    if (wasAtBottom) {
-      logsContent.scrollTop = logsContent.scrollHeight;
-    }
-  } catch (err) {
-    logsContent.innerHTML = '<div class="logs-empty">Failed to fetch logs. Is PennyClaw running?</div>';
-  }
-}
-
-function escapeHtml(text) {
-  const div = document.createElement('div');
-  div.textContent = text;
-  return div.innerHTML;
-}
-
-// --- Chat ---
-input.addEventListener('keydown', (e) => {
-  if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendMessage(); }
-});
-input.addEventListener('input', () => {
-  input.style.height = 'auto';
-  input.style.height = Math.min(input.scrollHeight, 120) + 'px';
-});
-
-function addMessage(role, content) {
-  if (isWelcome) { chat.innerHTML = ''; isWelcome = false; }
-  const div = document.createElement('div');
-  div.className = 'msg ' + role;
-  div.textContent = content;
-  chat.appendChild(div);
-  chat.scrollTop = chat.scrollHeight;
-  return div;
-}
-
-function showTyping() {
-  const div = document.createElement('div');
-  div.className = 'msg assistant';
-  div.id = 'typing';
-  div.innerHTML = '<div class="typing"><span></span><span></span><span></span></div>';
-  chat.appendChild(div);
-  chat.scrollTop = chat.scrollHeight;
-}
-
-function hideTyping() {
-  const el = document.getElementById('typing');
-  if (el) el.remove();
-}
-
-async function sendMessage() {
-  const msg = input.value.trim();
-  if (!msg) return;
-  input.value = '';
-  input.style.height = 'auto';
-  sendBtn.disabled = true;
-  addMessage('user', msg);
-  showTyping();
-  try {
-    const headers = { 'Content-Type': 'application/json' };
-    if (authToken) headers['Authorization'] = 'Bearer ' + authToken;
-    const res = await fetch('/api/chat', {
-      method: 'POST',
-      headers: headers,
-      body: JSON.stringify({ message: msg, session_id: sessionId })
-    });
-    if (res.status === 401) {
-      hideTyping();
-      addMessage('system', 'Session expired. Please sign in again.');
-      doLogout();
-      return;
-    }
-    const data = await res.json();
-    hideTyping();
-    addMessage('assistant', data.response);
-  } catch (err) {
-    hideTyping();
-    addMessage('system', 'Connection error. Is PennyClaw running?');
-  }
-  sendBtn.disabled = false;
-  input.focus();
-}
-input.focus();
-</script>
-</body>
-</html>
-`

@@ -15,7 +15,6 @@ import (
 	"github.com/mandarl/pennyclaw/internal/memory"
 	"github.com/mandarl/pennyclaw/internal/sandbox"
 	"github.com/mandarl/pennyclaw/internal/skills"
-	"github.com/mandarl/pennyclaw/internal/channels/web"
 )
 
 // Agent is the core PennyClaw agent.
@@ -25,8 +24,6 @@ type Agent struct {
 	memory   *memory.Store
 	sandbox  *sandbox.Sandbox
 	skills   *skills.Registry
-	webUI    *web.Server
-
 	// supportsTools indicates whether the LLM provider supports tool/function calling.
 	// Anthropic and Gemini providers currently operate in text-only mode.
 	supportsTools bool
@@ -86,30 +83,8 @@ func New(cfg *config.Config) (*Agent, error) {
 	}, nil
 }
 
-// Start begins the agent's event loops and channels.
-func (a *Agent) Start(ctx context.Context) error {
-	// Start web UI if enabled
-	if a.cfg.Channels.Web.Enabled {
-		a.webUI = web.NewServer(a.cfg.Server.Host, a.cfg.Server.Port, a.handleMessage)
-		go func() {
-			if err := a.webUI.Start(); err != nil {
-				log.Printf("Web UI error: %v", err)
-			}
-		}()
-		log.Printf("Web UI: http://%s:%d", a.cfg.Server.Host, a.cfg.Server.Port)
-	}
-
-	// TODO: Start Telegram channel if enabled
-	// TODO: Start Discord channel if enabled
-
-	return nil
-}
-
 // Stop gracefully shuts down the agent.
 func (a *Agent) Stop() {
-	if a.webUI != nil {
-		a.webUI.Stop()
-	}
 	if a.memory != nil {
 		a.memory.Close()
 	}
@@ -214,6 +189,11 @@ func (a *Agent) handleMessage(ctx context.Context, sessionID, userMessage, chann
 // HandleMessage is the exported version for use by channel handlers.
 func (a *Agent) HandleMessage(ctx context.Context, sessionID, message, channel string) (string, error) {
 	return a.handleMessage(ctx, sessionID, message, channel)
+}
+
+// Memory returns the agent's memory store for use by other components.
+func (a *Agent) Memory() *memory.Store {
+	return a.memory
 }
 
 // HealthCheck returns the agent's health status.

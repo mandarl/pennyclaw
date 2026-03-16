@@ -81,8 +81,18 @@ docker run -p 3000:3000 \
 - **Multi-provider LLM gateway** — OpenAI, Anthropic, Google Gemini, OpenRouter, and any OpenAI-compatible API
 - **Persistent memory** — SQLite-backed conversation history that survives restarts
 - **Tool execution** — Sandboxed shell commands, file I/O, web search, HTTP requests
-- **Web chat UI** — Clean, embedded interface with zero external dependencies
+- **Web chat UI** — Full-featured embedded interface with Markdown rendering, syntax highlighting, and dark/light themes
+- **Session management** — Create, switch, and delete conversations with sidebar navigation
 - **In-browser logs viewer** — Slide-out panel with color-coded log levels, auto-refresh, no SSH needed
+- **Settings panel** — Change model, API key, temperature, system prompt from the UI (no SSH required)
+- **Self-update** — Check for and install updates directly from the web UI
+- **Copy code blocks** — One-click copy button on all code blocks in assistant responses
+- **Export chat** — Download conversations as Markdown files
+- **File upload** — Drag-and-drop files into the chat for the agent to process
+- **Token tracking** — Monitor cumulative token usage across sessions
+- **Keyboard shortcuts** — Ctrl+K (new chat), Ctrl+L (clear), Ctrl+E (export), Esc (close panels)
+- **Notification sound** — Optional audio ping when responses arrive
+- **Mobile responsive** — Full sidebar and panel support on mobile devices
 
 ### Deployment
 - **One-click GCP deploy** — Guided Cloud Shell tutorial with automated setup

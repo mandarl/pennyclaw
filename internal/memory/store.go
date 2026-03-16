@@ -140,6 +140,65 @@ func (s *Store) ClearSession(sessionID string) error {
 	return err
 }
 
+// Session represents a conversation session summary.
+type Session struct {
+	ID         string    `json:"id"`
+	Channel    string    `json:"channel"`
+	CreatedAt  time.Time `json:"created_at"`
+	LastActive time.Time `json:"last_active"`
+	Preview    string    `json:"preview"`
+	MsgCount   int       `json:"msg_count"`
+}
+
+// ListSessions returns all sessions ordered by most recently active.
+func (s *Store) ListSessions() ([]Session, error) {
+	rows, err := s.db.Query(`
+		SELECT
+			s.id, s.channel, s.created_at, s.last_active,
+			COALESCE(
+				(SELECT SUBSTR(m.content, 1, 80) FROM messages m
+				 WHERE m.session_id = s.id AND m.role = 'user'
+				 ORDER BY m.created_at ASC LIMIT 1),
+				'(empty)'
+			) as preview,
+			(SELECT COUNT(*) FROM messages m WHERE m.session_id = s.id) as msg_count
+		FROM sessions s
+		ORDER BY s.last_active DESC
+		LIMIT 50`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var sessions []Session
+	for rows.Next() {
+		var sess Session
+		if err := rows.Scan(&sess.ID, &sess.Channel, &sess.CreatedAt, &sess.LastActive, &sess.Preview, &sess.MsgCount); err != nil {
+			return nil, err
+		}
+		sessions = append(sessions, sess)
+	}
+	return sessions, nil
+}
+
+// DeleteSession removes a session and all its messages.
+func (s *Store) DeleteSession(sessionID string) error {
+	tx, err := s.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	_, err = tx.Exec("DELETE FROM messages WHERE session_id = ?", sessionID)
+	if err != nil {
+		return err
+	}
+	_, err = tx.Exec("DELETE FROM sessions WHERE id = ?", sessionID)
+	if err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
 // Close closes the database connection.
 func (s *Store) Close() error {
 	return s.db.Close()
