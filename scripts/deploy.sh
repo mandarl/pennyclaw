@@ -112,16 +112,67 @@ else
     exit 1
 fi
 
-# Check 3: Project selected
+# Check 3: Project selected (with interactive picker for first-time users)
 PROJECT=$(gcloud config get-value project 2>/dev/null || echo "")
 if [[ -n "$PROJECT" && "$PROJECT" != "(unset)" ]]; then
     ok "Project: ${PROJECT}"
 else
-    fail "No project selected. Run: gcloud config set project YOUR_PROJECT_ID"
-    exit 1
+    warn "No GCP project selected."
+    echo ""
+    info "Let me find your available projects..."
+    echo ""
+
+    # List available projects
+    PROJECT_LIST=$(gcloud projects list --format="value(projectId,name)" 2>/dev/null || echo "")
+
+    if [[ -z "$PROJECT_LIST" ]]; then
+        # No projects found — guide user to create one
+        echo -e "  ${YELLOW}You don't have any GCP projects yet.${NC}"
+        echo ""
+        echo -e "  ${BOLD}To create a free project:${NC}"
+        echo -e "  1. Open: ${CYAN}https://console.cloud.google.com/projectcreate${NC}"
+        echo -e "  2. Enter a project name (e.g., 'pennyclaw')"
+        echo -e "  3. Click 'Create'"
+        echo -e "  4. Re-run this script"
+        echo ""
+        fail "No GCP project available."
+        exit 1
+    fi
+
+    # Display projects as a numbered list
+    echo -e "  ${BOLD}Your GCP projects:${NC}"
+    echo ""
+    i=1
+    declare -a PROJECT_IDS
+    while IFS=$'\t' read -r pid pname; do
+        PROJECT_IDS[$i]="$pid"
+        printf "  ${CYAN}%2d)${NC}  %-30s  %s\n" "$i" "$pid" "${pname:-}"
+        i=$((i + 1))
+    done <<< "$PROJECT_LIST"
+    echo ""
+
+    TOTAL_PROJECTS=$((i - 1))
+    if [[ $TOTAL_PROJECTS -eq 1 ]]; then
+        # Only one project — auto-select it
+        PROJECT="${PROJECT_IDS[1]}"
+        info "Only one project found. Auto-selecting: ${PROJECT}"
+    else
+        # Multiple projects — let user pick
+        ask "Enter project number (1-${TOTAL_PROJECTS}):"
+        if [[ "$REPLY" =~ ^[0-9]+$ ]] && [[ $REPLY -ge 1 ]] && [[ $REPLY -le $TOTAL_PROJECTS ]]; then
+            PROJECT="${PROJECT_IDS[$REPLY]}"
+        else
+            fail "Invalid selection. Please enter a number between 1 and ${TOTAL_PROJECTS}."
+            exit 1
+        fi
+    fi
+
+    # Set the project
+    gcloud config set project "$PROJECT" 2>/dev/null
+    ok "Project selected: ${PROJECT}"
 fi
 
-# Check 4: Billing enabled
+# Check 4: Billing enabled (REQUIRED — hard stop if not enabled)
 BILLING_ENABLED="false"
 if gcloud billing projects describe "$PROJECT" --format="value(billingEnabled)" &>/dev/null; then
     BILLING_ENABLED=$(gcloud billing projects describe "$PROJECT" --format="value(billingEnabled)" 2>/dev/null || echo "false")
@@ -129,9 +180,20 @@ fi
 if [[ "$BILLING_ENABLED" == "True" ]]; then
     ok "Billing is enabled (required even for free tier)"
 else
-    warn "Could not verify billing status (may need billing.projects.get permission)."
-    warn "Free tier requires a billing account. Verify at:"
-    info "https://console.cloud.google.com/billing/linkedaccount?project=${PROJECT}"
+    fail "Billing is not enabled on project '${PROJECT}'."
+    echo ""
+    echo -e "  ${BOLD}GCP requires a billing account even for the Always Free tier.${NC}"
+    echo -e "  You will ${BOLD}not${NC} be charged — the free tier covers everything PennyClaw uses."
+    echo ""
+    echo -e "  ${BOLD}To enable billing:${NC}"
+    echo -e "  1. Open: ${CYAN}https://console.cloud.google.com/billing/linkedaccount?project=${PROJECT}${NC}"
+    echo -e "  2. Link a billing account (or create one — a credit card is required but won't be charged)"
+    echo -e "  3. Re-run this script"
+    echo ""
+    echo -e "  ${YELLOW}Why?${NC} Google requires billing to provision Compute Engine VMs, even free ones."
+    echo -e "  PennyClaw's deploy script sets up a \$1 billing budget alert as a safety net."
+    echo ""
+    exit 1
 fi
 
 # Check 5: Compute Engine API
@@ -143,8 +205,14 @@ else
     if gcloud services enable compute.googleapis.com --project="$PROJECT" 2>/dev/null; then
         ok "Compute Engine API enabled"
     else
-        fail "Could not enable Compute Engine API. Enable it manually:"
-        info "https://console.cloud.google.com/apis/library/compute.googleapis.com?project=${PROJECT}"
+        fail "Could not enable Compute Engine API."
+        echo ""
+        echo -e "  ${BOLD}To enable it manually:${NC}"
+        echo -e "  1. Open: ${CYAN}https://console.cloud.google.com/apis/library/compute.googleapis.com?project=${PROJECT}${NC}"
+        echo -e "  2. Click 'Enable'"
+        echo -e "  3. Re-run this script"
+        echo ""
+        exit 1
     fi
 fi
 
