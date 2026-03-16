@@ -292,19 +292,43 @@ else
 fi
 
 # Check 8: Check for existing PennyClaw installation
-EXISTING_PC=$(gcloud compute instances list \
+EXISTING_PC_NAME=""
+EXISTING_PC_ZONE=""
+EXISTING_PC_STATUS=""
+EXISTING_PC_RAW=$(gcloud compute instances list \
     --filter="name~${INSTANCE_PREFIX}" \
-    --format="value(name,zone,status)" \
+    --format="value(name,zone.basename(),status)" \
     --project="$PROJECT" 2>/dev/null || echo "")
-if [[ -n "$EXISTING_PC" ]]; then
-    warn "Existing PennyClaw instance found: ${EXISTING_PC}"
-    ask "Upgrade existing instance instead of creating new? (Y/n)"
-    if [[ "$REPLY" =~ ^[Nn]$ ]]; then
-        info "Will create a new instance."
-    else
-        UPGRADE_MODE=true
-        info "Will upgrade existing instance."
-    fi
+if [[ -n "$EXISTING_PC_RAW" ]]; then
+    EXISTING_PC_NAME=$(echo "$EXISTING_PC_RAW" | head -1 | awk '{print $1}')
+    EXISTING_PC_ZONE=$(echo "$EXISTING_PC_RAW" | head -1 | awk '{print $2}')
+    EXISTING_PC_STATUS=$(echo "$EXISTING_PC_RAW" | head -1 | awk '{print $3}')
+    warn "Existing PennyClaw instance found: ${EXISTING_PC_NAME} (${EXISTING_PC_ZONE}, ${EXISTING_PC_STATUS})"
+    echo ""
+    echo -e "  ${BOLD}What would you like to do?${NC}"
+    echo -e "  ${CYAN}1)${NC}  Wait for it — skip to health checks (instance is still starting up)"
+    echo -e "  ${CYAN}2)${NC}  Upgrade it — stop service, redeploy binary, restart"
+    echo -e "  ${CYAN}3)${NC}  Create new — deploy a fresh instance alongside it"
+    echo ""
+    ask "Enter choice (1/2/3) [default: 1]:"
+    case "${REPLY:-1}" in
+        2)
+            UPGRADE_MODE=true
+            BEST_ZONE="$EXISTING_PC_ZONE"
+            EXISTING_PC="$EXISTING_PC_NAME"
+            info "Will upgrade existing instance."
+            ;;
+        3)
+            info "Will create a new instance."
+            ;;
+        *)
+            # Option 1: skip directly to health checks
+            INSTANCE_NAME="$EXISTING_PC_NAME"
+            BEST_ZONE="$EXISTING_PC_ZONE"
+            SKIP_TO_HEALTH_CHECK=true
+            info "Skipping deployment — will wait for ${INSTANCE_NAME} to come online."
+            ;;
+    esac
 fi
 
 # Check 9: Disk usage
@@ -414,6 +438,14 @@ fi
 info "Network tier: ${NETWORK_TIER} (free tier uses Standard, not Premium)"
 ok "Network tier verified: ${NETWORK_TIER}"
 
+# If user chose to wait for existing instance, skip straight to health checks
+if [[ "${SKIP_TO_HEALTH_CHECK:-false}" == "true" ]]; then
+    # Jump directly to Phase 8
+    echo ""
+    step "Skipping Phases 5-7 (existing instance detected)"
+    info "Instance: ${INSTANCE_NAME} (${BEST_ZONE})"
+else
+
 # ============================================================================
 step "PHASE 5: Pre-Deploy Cost Summary"
 
@@ -472,6 +504,7 @@ fi
 step "PHASE 7: Deploying PennyClaw"
 
 INSTANCE_NAME="${INSTANCE_PREFIX}-$(date +%s | tail -c 6)"
+SKIP_TO_HEALTH_CHECK=false
 
 # Create startup script
 STARTUP_SCRIPT=$(cat <<'STARTUP'
@@ -614,9 +647,10 @@ trap 'rm -f "$STARTUP_SCRIPT_FILE"' EXIT
 # Handle upgrade mode: stop existing service, redeploy binary
 if [[ "${UPGRADE_MODE:-false}" == "true" ]]; then
     info "Upgrading existing instance: ${EXISTING_PC}..."
-    gcloud compute ssh "$EXISTING_PC" \
+    timeout 20 gcloud compute ssh "$EXISTING_PC" \
         --zone="$BEST_ZONE" \
         --project="$PROJECT" \
+        --ssh-flag="-o ConnectTimeout=10" \
         --command="sudo systemctl stop pennyclaw 2>/dev/null; echo 'Service stopped'" || true
     INSTANCE_NAME="$EXISTING_PC"
     # Re-run startup script on existing instance
@@ -663,6 +697,8 @@ gcloud compute firewall-rules create pennyclaw-allow-web \
     2>/dev/null || warn "Firewall rule already exists"
 
 ok "Firewall configured"
+
+fi  # end of SKIP_TO_HEALTH_CHECK guard
 
 # ============================================================================
 step "PHASE 8: Post-Deploy Health Checks"
@@ -731,13 +767,17 @@ if [[ "$STATUS" != "200" ]]; then
 fi
 
 # Check memory usage
-info "Checking resource usage..."
-MEMORY_INFO=$(gcloud compute ssh "$INSTANCE_NAME" \
-    --zone="$BEST_ZONE" \
-    --project="$PROJECT" \
-    --command="free -m | grep Mem | awk '{printf \"%d/%dMB (%.0f%%)\", \$3, \$2, \$3/\$2*100}'" \
-    2>/dev/null || echo "unknown")
-info "Memory usage: ${MEMORY_INFO}"
+# Only check resource usage if PennyClaw is healthy (SSH likely works)
+if [[ "$STATUS" == "200" ]]; then
+    info "Checking resource usage..."
+    MEMORY_INFO=$(timeout 15 gcloud compute ssh "$INSTANCE_NAME" \
+        --zone="$BEST_ZONE" \
+        --project="$PROJECT" \
+        --ssh-flag="-o ConnectTimeout=10" \
+        --command="free -m | grep Mem | awk '{printf \"%d/%dMB (%.0f%%)\", \$3, \$2, \$3/\$2*100}'" \
+        2>/dev/null || echo "unknown")
+    info "Memory usage: ${MEMORY_INFO}"
+fi
 
 # ============================================================================
 step "PHASE 9: Setup Complete!"
@@ -749,9 +789,10 @@ echo -e "  • Web UI: ${CYAN}http://${EXTERNAL_IP}:3000${NC}"
 echo -e "  • Health: ${CYAN}http://${EXTERNAL_IP}:3000/api/health${NC}"
 echo ""
 # Retrieve the auto-generated auth token
-AUTH_TOKEN=$(gcloud compute ssh "$INSTANCE_NAME" \
+AUTH_TOKEN=$(timeout 15 gcloud compute ssh "$INSTANCE_NAME" \
     --zone="$BEST_ZONE" \
     --project="$PROJECT" \
+    --ssh-flag="-o ConnectTimeout=10" \
     --command="grep PENNYCLAW_AUTH_TOKEN /opt/pennyclaw/.env 2>/dev/null | cut -d= -f2" \
     2>/dev/null || echo "")
 
