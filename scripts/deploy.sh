@@ -65,35 +65,39 @@ fail()  { echo -e "  ${RED}✗${NC}  $1"; CHECKS_FAILED=$((CHECKS_FAILED + 1)); 
 step()  { echo -e "\n${BOLD}━━━ $1 ━━━${NC}\n"; }
 ask()   { echo -ne "  ${CYAN}?${NC}  $1 "; read -r REPLY; }
 
-# Run a command with a spinner to show progress
+# Run a command with a progress indicator to show it's working
+# Uses dots instead of a spinner for maximum terminal compatibility
+# (Cloud Shell's web terminal doesn't always redraw \r-based spinners)
 # Usage: run_with_spinner "message" command arg1 arg2 ...
 run_with_spinner() {
     local msg="$1"
     shift
-    local spin_chars='⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏'
-    local sc_len=${#spin_chars}
 
     # Start the command in the background
     "$@" &>/dev/null &
     local pid=$!
-    local i=0
     local elapsed=0
 
-    # Show spinner while command runs
+    # Print message, then append dots every 3 seconds
+    printf "  ${CYAN}⏳${NC}  %s " "$msg"
     while kill -0 "$pid" 2>/dev/null; do
-        local c=${spin_chars:$((i % sc_len)):1}
-        printf "\r  ${CYAN}%s${NC}  %s (%ds)" "$c" "$msg" "$elapsed"
         sleep 1
-        i=$((i + 1))
         elapsed=$((elapsed + 1))
+        if (( elapsed % 3 == 0 )); then
+            printf "."
+        fi
     done
 
     # Get exit code
     wait "$pid"
     local exit_code=$?
 
-    # Clear the spinner line
-    printf "\r%-80s\r" ""
+    # Print result on the same line
+    if [[ $exit_code -eq 0 ]]; then
+        echo -e " ${GREEN}done${NC} (${elapsed}s)"
+    else
+        echo -e " ${RED}failed${NC} (${elapsed}s)"
+    fi
 
     return $exit_code
 }
