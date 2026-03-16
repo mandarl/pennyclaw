@@ -252,46 +252,8 @@ fi
 # ============================================================================
 step "PHASE 2: Free Tier Eligibility"
 
-# Check 6: Existing e2-micro instances (CRITICAL)
-EXISTING_MICROS=$(gcloud compute instances list \
-    --filter="machineType~e2-micro AND status=RUNNING" \
-    --format="value(name,zone)" \
-    --project="$PROJECT" 2>/dev/null || echo "")
-
-if [[ -z "$EXISTING_MICROS" ]]; then
-    ok "No existing e2-micro instances found — you're eligible for the free tier!"
-else
-    MICRO_COUNT=$(echo "$EXISTING_MICROS" | wc -l)
-    fail "Found ${MICRO_COUNT} running e2-micro instance(s):"
-    echo "$EXISTING_MICROS" | while read -r line; do
-        echo -e "     ${YELLOW}→ ${line}${NC}"
-    done
-    echo ""
-    warn "GCP's free tier only covers ONE e2-micro instance per billing account."
-    warn "Deploying another will incur charges (~\$4.50/month for e2-micro)."
-    echo ""
-    ask "Continue anyway? (y/N)"
-    if [[ ! "$REPLY" =~ ^[Yy]$ ]]; then
-        info "Deployment cancelled. Consider stopping an existing instance first."
-        exit 0
-    fi
-fi
-
-# Check 7: Existing instances of any type
-ALL_INSTANCES=$(gcloud compute instances list \
-    --format="table[no-heading](name,machineType.basename(),zone.basename(),status)" \
-    --project="$PROJECT" 2>/dev/null || echo "")
-if [[ -n "$ALL_INSTANCES" ]]; then
-    INSTANCE_COUNT=$(echo "$ALL_INSTANCES" | wc -l)
-    warn "Found ${INSTANCE_COUNT} total instance(s) in this project:"
-    echo "$ALL_INSTANCES" | while read -r line; do
-        echo -e "     ${YELLOW}→ ${line}${NC}"
-    done
-else
-    ok "No existing instances — clean project"
-fi
-
-# Check 8: Check for existing PennyClaw installation
+# Check 6: Check for existing PennyClaw installation FIRST
+# (so we can offer "wait for it" before the e2-micro warning scares users away)
 EXISTING_PC_NAME=""
 EXISTING_PC_ZONE=""
 EXISTING_PC_STATUS=""
@@ -329,6 +291,47 @@ if [[ -n "$EXISTING_PC_RAW" ]]; then
             info "Skipping deployment — will wait for ${INSTANCE_NAME} to come online."
             ;;
     esac
+fi
+
+# Check 7: Existing e2-micro instances (only relevant if deploying a new one)
+if [[ "${SKIP_TO_HEALTH_CHECK:-false}" != "true" && "${UPGRADE_MODE:-false}" != "true" ]]; then
+    EXISTING_MICROS=$(gcloud compute instances list \
+        --filter="machineType~e2-micro AND status=RUNNING" \
+        --format="value(name,zone)" \
+        --project="$PROJECT" 2>/dev/null || echo "")
+
+    if [[ -z "$EXISTING_MICROS" ]]; then
+        ok "No existing e2-micro instances found — you're eligible for the free tier!"
+    else
+        MICRO_COUNT=$(echo "$EXISTING_MICROS" | wc -l)
+        fail "Found ${MICRO_COUNT} running e2-micro instance(s):"
+        echo "$EXISTING_MICROS" | while read -r line; do
+            echo -e "     ${YELLOW}→ ${line}${NC}"
+        done
+        echo ""
+        warn "GCP's free tier only covers ONE e2-micro instance per billing account."
+        warn "Deploying another will incur charges (~\$4.50/month for e2-micro)."
+        echo ""
+        ask "Continue anyway? (y/N)"
+        if [[ ! "$REPLY" =~ ^[Yy]$ ]]; then
+            info "Deployment cancelled. Consider stopping an existing instance first."
+            exit 0
+        fi
+    fi
+fi
+
+# Check 8: Existing instances of any type (informational)
+ALL_INSTANCES=$(gcloud compute instances list \
+    --format="table[no-heading](name,machineType.basename(),zone.basename(),status)" \
+    --project="$PROJECT" 2>/dev/null || echo "")
+if [[ -n "$ALL_INSTANCES" ]]; then
+    INSTANCE_COUNT=$(echo "$ALL_INSTANCES" | wc -l)
+    warn "Found ${INSTANCE_COUNT} total instance(s) in this project:"
+    echo "$ALL_INSTANCES" | while read -r line; do
+        echo -e "     ${YELLOW}→ ${line}${NC}"
+    done
+else
+    ok "No existing instances — clean project"
 fi
 
 # Check 9: Disk usage
