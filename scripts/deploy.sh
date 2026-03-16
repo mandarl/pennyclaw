@@ -325,31 +325,54 @@ fi
 step "PHASE 3: Region Selection"
 
 # Check 10: Auto-detect best free-tier region by latency
-info "Testing latency to free-tier regions..."
+info "Testing latency to free-tier regions (3 regions)..."
 BEST_REGION=""
 BEST_LATENCY=9999
+LATENCY_TESTED=0
 
 for i in "${!FREE_REGIONS[@]}"; do
     REGION=${FREE_REGIONS[$i]}
-    # Ping the region's metadata endpoint (approximate)
+    ZONE=${FREE_ZONES[$i]}
+    printf "\r  ${CYAN}⠋${NC}  Testing %s..." "$REGION"
+
+    # Measure connection time to a regional endpoint
     LATENCY=$(curl -o /dev/null -s -w '%{time_connect}' \
-        "https://${REGION}-docker.pkg.dev" 2>/dev/null || echo "9999")
-    LATENCY_MS=$(echo "$LATENCY * 1000" | bc 2>/dev/null | cut -d. -f1)
-    
-    if [[ -n "$LATENCY_MS" ]] && [[ "$LATENCY_MS" -lt "$BEST_LATENCY" ]]; then
-        BEST_LATENCY=$LATENCY_MS
-        BEST_REGION=$REGION
-        BEST_ZONE=${FREE_ZONES[$i]}
+        --connect-timeout 5 --max-time 10 \
+        "https://${REGION}-docker.pkg.dev" 2>/dev/null) || LATENCY=""
+
+    # Convert to milliseconds safely (avoid bc failures with empty/bad input)
+    LATENCY_MS=""
+    if [[ -n "$LATENCY" && "$LATENCY" != "0.000000" ]]; then
+        LATENCY_MS=$(printf '%.0f' "$(echo "$LATENCY * 1000" | bc 2>/dev/null)" 2>/dev/null) || LATENCY_MS=""
     fi
-    info "  ${REGION}: ${LATENCY_MS:-???}ms"
+
+    # Clear the spinner line
+    printf "\r%-80s\r" ""
+
+    if [[ -n "$LATENCY_MS" && "$LATENCY_MS" =~ ^[0-9]+$ ]]; then
+        info "  ${REGION}: ${LATENCY_MS}ms"
+        LATENCY_TESTED=$((LATENCY_TESTED + 1))
+        if [[ "$LATENCY_MS" -lt "$BEST_LATENCY" ]]; then
+            BEST_LATENCY=$LATENCY_MS
+            BEST_REGION=$REGION
+            BEST_ZONE=$ZONE
+        fi
+    else
+        info "  ${REGION}: could not measure (skipped)"
+    fi
 done
 
+# Fallback if no latency test succeeded
 if [[ -z "$BEST_REGION" ]]; then
     BEST_REGION="us-central1"
     BEST_ZONE="us-central1-a"
+    if [[ $LATENCY_TESTED -eq 0 ]]; then
+        warn "Could not measure latency to any region (network issue?)."
+        info "Defaulting to ${BEST_REGION} — you can change this later."
+    fi
 fi
 
-ok "Selected region: ${BEST_REGION} (${BEST_ZONE}) — ${BEST_LATENCY}ms latency"
+ok "Selected region: ${BEST_REGION} (${BEST_ZONE})$([ "$BEST_LATENCY" -lt 9999 ] && echo " — ${BEST_LATENCY}ms latency" || echo "")"
 
 # Validate region is in free tier
 REGION_VALID=false
