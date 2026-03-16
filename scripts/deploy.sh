@@ -65,6 +65,39 @@ fail()  { echo -e "  ${RED}✗${NC}  $1"; CHECKS_FAILED=$((CHECKS_FAILED + 1)); 
 step()  { echo -e "\n${BOLD}━━━ $1 ━━━${NC}\n"; }
 ask()   { echo -ne "  ${CYAN}?${NC}  $1 "; read -r REPLY; }
 
+# Run a command with a spinner to show progress
+# Usage: run_with_spinner "message" command arg1 arg2 ...
+run_with_spinner() {
+    local msg="$1"
+    shift
+    local spin_chars='⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏'
+    local sc_len=${#spin_chars}
+
+    # Start the command in the background
+    "$@" &>/dev/null &
+    local pid=$!
+    local i=0
+    local elapsed=0
+
+    # Show spinner while command runs
+    while kill -0 "$pid" 2>/dev/null; do
+        local c=${spin_chars:$((i % sc_len)):1}
+        printf "\r  ${CYAN}%s${NC}  %s (%ds)" "$c" "$msg" "$elapsed"
+        sleep 1
+        i=$((i + 1))
+        elapsed=$((elapsed + 1))
+    done
+
+    # Get exit code
+    wait "$pid"
+    local exit_code=$?
+
+    # Clear the spinner line
+    printf "\r%-80s\r" ""
+
+    return $exit_code
+}
+
 # ============================================================================
 # Parse Arguments
 # ============================================================================
@@ -201,8 +234,8 @@ COMPUTE_API=$(gcloud services list --enabled --filter="name:compute.googleapis.c
 if [[ -n "$COMPUTE_API" ]]; then
     ok "Compute Engine API is enabled"
 else
-    info "Enabling Compute Engine API..."
-    if gcloud services enable compute.googleapis.com --project="$PROJECT" 2>/dev/null; then
+    info "Enabling Compute Engine API (this can take 30-60 seconds)..."
+    if run_with_spinner "Enabling Compute Engine API" gcloud services enable compute.googleapis.com --project="$PROJECT"; then
         ok "Compute Engine API enabled"
     else
         fail "Could not enable Compute Engine API."
