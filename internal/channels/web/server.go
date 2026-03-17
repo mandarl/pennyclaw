@@ -16,9 +16,13 @@ import (
 	"sync"
 	"time"
 
+	"strconv"
+
 	"github.com/creativeprojects/go-selfupdate"
 	"github.com/mandarl/pennyclaw/internal/config"
+	"github.com/mandarl/pennyclaw/internal/cron"
 	"github.com/mandarl/pennyclaw/internal/memory"
+	"github.com/mandarl/pennyclaw/internal/workspace"
 )
 
 // MessageHandler is the function signature for processing messages.
@@ -118,6 +122,8 @@ type Server struct {
 	memory     *memory.Store
 	version    string
 	uploadDir  string
+	workspace  *workspace.Workspace
+	scheduler  *cron.Scheduler
 }
 
 // rateLimiter implements a simple per-IP token bucket rate limiter.
@@ -166,18 +172,20 @@ func (s *Server) logf(level, format string, args ...interface{}) {
 }
 
 // NewServer creates a new web UI server.
-func NewServer(host string, port int, handler MessageHandler, cfg *config.Config, cfgPath string, mem *memory.Store, version string) *Server {
+func NewServer(host string, port int, handler MessageHandler, cfg *config.Config, cfgPath string, mem *memory.Store, version string, ws *workspace.Workspace, sched *cron.Scheduler) *Server {
 	s := &Server{
-		host:    host,
-		port:    port,
-		handler: handler,
-		limiter: newRateLimiter(20, time.Minute),
-		logs:    newLogBuffer(200),
-		tokens:  &TokenUsage{},
-		cfg:     cfg,
-		cfgPath: cfgPath,
-		memory:  mem,
-		version: version,
+		host:      host,
+		port:      port,
+		handler:   handler,
+		limiter:   newRateLimiter(20, time.Minute),
+		logs:      newLogBuffer(200),
+		tokens:    &TokenUsage{},
+		cfg:       cfg,
+		cfgPath:   cfgPath,
+		memory:    mem,
+		version:   version,
+		workspace: ws,
+		scheduler: sched,
 	}
 
 	// Set up upload directory
@@ -216,6 +224,15 @@ func (s *Server) Start() error {
 	mux.HandleFunc("/api/upgrade", s.handleUpgrade)
 	mux.HandleFunc("/api/upload", s.handleUpload)
 	mux.HandleFunc("/api/export", s.handleExport)
+
+	// Workspace endpoints
+	mux.HandleFunc("/api/workspace", s.handleWorkspaceList)
+	mux.HandleFunc("/api/workspace/", s.handleWorkspaceFile)
+	mux.HandleFunc("/api/workspace/bootstrap", s.handleWorkspaceBootstrap)
+
+	// Cron endpoints
+	mux.HandleFunc("/api/cron", s.handleCronJobs)
+	mux.HandleFunc("/api/cron/", s.handleCronJobByID)
 
 	s.srv = &http.Server{
 		Addr:         fmt.Sprintf("%s:%d", s.host, s.port),
@@ -689,6 +706,253 @@ func (s *Server) handleExport(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 	w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=\"pennyclaw-chat-%s.%s\"", sessionID, ext))
 	w.Write([]byte(content.String()))
+}
+
+// --- Workspace API ---
+
+func (s *Server) handleWorkspaceList(w http.ResponseWriter, r *http.Request) {
+	if !s.requireAuth(w, r) {
+		return
+	}
+	if s.workspace == nil {
+		http.Error(w, "Workspace not available", http.StatusServiceUnavailable)
+		return
+	}
+
+	files, err := s.workspace.List()
+	if err != nil {
+		http.Error(w, "Failed to list workspace files", http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"files":            files,
+		"needs_bootstrap":  s.workspace.NeedsBootstrap(),
+	})
+}
+
+func (s *Server) handleWorkspaceFile(w http.ResponseWriter, r *http.Request) {
+	if !s.requireAuth(w, r) {
+		return
+	}
+	if s.workspace == nil {
+		http.Error(w, "Workspace not available", http.StatusServiceUnavailable)
+		return
+	}
+
+	filename := strings.TrimPrefix(r.URL.Path, "/api/workspace/")
+	if filename == "" || filename == "bootstrap" {
+		// /api/workspace/bootstrap is handled by handleWorkspaceBootstrap
+		http.Error(w, "Filename required", http.StatusBadRequest)
+		return
+	}
+
+	switch r.Method {
+	case http.MethodGet:
+		content, err := s.workspace.Read(filename)
+		if err != nil {
+			http.Error(w, fmt.Sprintf("Failed to read file: %v", err), http.StatusNotFound)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]string{
+			"filename": filename,
+			"content":  content,
+		})
+
+	case http.MethodPut:
+		var body struct {
+			Content string `json:"content"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			http.Error(w, "Invalid JSON", http.StatusBadRequest)
+			return
+		}
+		if err := s.workspace.Write(filename, body.Content); err != nil {
+			http.Error(w, fmt.Sprintf("Failed to write file: %v", err), http.StatusBadRequest)
+			return
+		}
+		s.logf("INFO", "Workspace file %s updated via web UI", filename)
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
+
+	case http.MethodDelete:
+		if err := s.workspace.Delete(filename); err != nil {
+			http.Error(w, fmt.Sprintf("Failed to delete file: %v", err), http.StatusBadRequest)
+			return
+		}
+		s.logf("INFO", "Workspace file %s deleted via web UI", filename)
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
+
+	default:
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+	}
+}
+
+func (s *Server) handleWorkspaceBootstrap(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	if !s.requireAuth(w, r) {
+		return
+	}
+	if s.workspace == nil {
+		http.Error(w, "Workspace not available", http.StatusServiceUnavailable)
+		return
+	}
+
+	if err := s.workspace.ResetBootstrap(); err != nil {
+		http.Error(w, fmt.Sprintf("Failed to reset bootstrap: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	s.logf("INFO", "Bootstrap reset via web UI — next conversation will trigger onboarding")
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]string{
+		"status":  "ok",
+		"message": "Bootstrap reset. Start a new conversation to begin onboarding.",
+	})
+}
+
+// --- Cron API ---
+
+func (s *Server) handleCronJobs(w http.ResponseWriter, r *http.Request) {
+	if !s.requireAuth(w, r) {
+		return
+	}
+	if s.scheduler == nil {
+		http.Error(w, "Scheduler not available", http.StatusServiceUnavailable)
+		return
+	}
+
+	switch r.Method {
+	case http.MethodGet:
+		jobs, err := s.scheduler.ListJobs()
+		if err != nil {
+			http.Error(w, "Failed to list jobs", http.StatusInternalServerError)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]interface{}{"jobs": jobs})
+
+	case http.MethodPost:
+		var job cron.Job
+		if err := json.NewDecoder(r.Body).Decode(&job); err != nil {
+			http.Error(w, "Invalid JSON", http.StatusBadRequest)
+			return
+		}
+		job.Enabled = true
+		if err := s.scheduler.CreateJob(&job); err != nil {
+			http.Error(w, fmt.Sprintf("Failed to create job: %v", err), http.StatusBadRequest)
+			return
+		}
+		s.logf("INFO", "Cron job '%s' created via web UI (ID: %d)", job.Name, job.ID)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusCreated)
+		json.NewEncoder(w).Encode(job)
+
+	default:
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+	}
+}
+
+func (s *Server) handleCronJobByID(w http.ResponseWriter, r *http.Request) {
+	if !s.requireAuth(w, r) {
+		return
+	}
+	if s.scheduler == nil {
+		http.Error(w, "Scheduler not available", http.StatusServiceUnavailable)
+		return
+	}
+
+	// Parse path: /api/cron/{id} or /api/cron/{id}/runs or /api/cron/{id}/run
+	path := strings.TrimPrefix(r.URL.Path, "/api/cron/")
+	parts := strings.SplitN(path, "/", 2)
+	if len(parts) == 0 || parts[0] == "" {
+		http.Error(w, "Job ID required", http.StatusBadRequest)
+		return
+	}
+
+	jobID, err := strconv.ParseInt(parts[0], 10, 64)
+	if err != nil {
+		http.Error(w, "Invalid job ID", http.StatusBadRequest)
+		return
+	}
+
+	// Sub-resource?
+	subResource := ""
+	if len(parts) > 1 {
+		subResource = parts[1]
+	}
+
+	switch subResource {
+	case "runs":
+		// GET /api/cron/{id}/runs
+		runs, err := s.scheduler.GetRuns(jobID, 20)
+		if err != nil {
+			http.Error(w, "Failed to get runs", http.StatusInternalServerError)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]interface{}{"runs": runs})
+
+	case "run":
+		// POST /api/cron/{id}/run
+		if r.Method != http.MethodPost {
+			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		if err := s.scheduler.RunNow(jobID); err != nil {
+			http.Error(w, fmt.Sprintf("Failed to run job: %v", err), http.StatusInternalServerError)
+			return
+		}
+		s.logf("INFO", "Cron job %d triggered manually via web UI", jobID)
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]string{"status": "ok", "message": "Job triggered"})
+
+	default:
+		// /api/cron/{id}
+		switch r.Method {
+		case http.MethodGet:
+			job, err := s.scheduler.GetJob(jobID)
+			if err != nil {
+				http.Error(w, fmt.Sprintf("Job not found: %v", err), http.StatusNotFound)
+				return
+			}
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(job)
+
+		case http.MethodPut:
+			var job cron.Job
+			if err := json.NewDecoder(r.Body).Decode(&job); err != nil {
+				http.Error(w, "Invalid JSON", http.StatusBadRequest)
+				return
+			}
+			job.ID = jobID
+			if err := s.scheduler.UpdateJob(&job); err != nil {
+				http.Error(w, fmt.Sprintf("Failed to update job: %v", err), http.StatusBadRequest)
+				return
+			}
+			s.logf("INFO", "Cron job %d updated via web UI", jobID)
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
+
+		case http.MethodDelete:
+			if err := s.scheduler.DeleteJob(jobID); err != nil {
+				http.Error(w, fmt.Sprintf("Failed to delete job: %v", err), http.StatusInternalServerError)
+				return
+			}
+			s.logf("INFO", "Cron job %d deleted via web UI", jobID)
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
+
+		default:
+			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		}
+	}
 }
 
 // --- Chat handler ---

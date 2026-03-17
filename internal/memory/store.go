@@ -199,6 +199,11 @@ func (s *Store) DeleteSession(sessionID string) error {
 	return tx.Commit()
 }
 
+// DB returns the underlying database connection for shared use by other packages.
+func (s *Store) DB() *sql.DB {
+	return s.db
+}
+
 // Close closes the database connection.
 func (s *Store) Close() error {
 	return s.db.Close()

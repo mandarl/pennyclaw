@@ -11,26 +11,32 @@ import (
 	"time"
 
 	"github.com/mandarl/pennyclaw/internal/config"
+	"github.com/mandarl/pennyclaw/internal/cron"
 	"github.com/mandarl/pennyclaw/internal/llm"
 	"github.com/mandarl/pennyclaw/internal/memory"
 	"github.com/mandarl/pennyclaw/internal/sandbox"
 	"github.com/mandarl/pennyclaw/internal/skills"
+	"github.com/mandarl/pennyclaw/internal/workspace"
 )
+
+// Version is set by the build process via ldflags.
+var Version = "dev"
 
 // Agent is the core PennyClaw agent.
 type Agent struct {
-	cfg      *config.Config
-	provider llm.Provider
-	memory   *memory.Store
-	sandbox  *sandbox.Sandbox
-	skills   *skills.Registry
+	cfg       *config.Config
+	provider  llm.Provider
+	memory    *memory.Store
+	sandbox   *sandbox.Sandbox
+	skills    *skills.Registry
+	workspace *workspace.Workspace
+	scheduler *cron.Scheduler
 	// supportsTools indicates whether the LLM provider supports tool/function calling.
-	// Anthropic and Gemini providers currently operate in text-only mode.
 	supportsTools bool
 }
 
 // New creates a new agent instance.
-func New(cfg *config.Config) (*Agent, error) {
+func New(cfg *config.Config, dataDir string) (*Agent, error) {
 	// Initialize LLM provider
 	provider, err := llm.NewProvider(cfg.LLM)
 	if err != nil {
@@ -61,30 +67,278 @@ func New(cfg *config.Config) (*Agent, error) {
 		log.Printf("Sandbox: restricted environment mode (non-root)")
 	}
 
+	// Initialize workspace
+	wsDir := dataDir + "/workspace"
+	ws, err := workspace.New(wsDir)
+	if err != nil {
+		return nil, fmt.Errorf("initializing workspace: %w", err)
+	}
+
 	// Initialize skills registry
 	skillRegistry := skills.NewRegistry(sb)
 	log.Printf("Loaded %d skills", len(skillRegistry.AsTools()))
 
 	// Determine tool support based on provider
-	// Currently only OpenAI-compatible providers support function calling properly.
-	// Anthropic and Gemini providers work in text-only mode.
 	supportsTools := provider.Name() == "openai"
 	if !supportsTools {
 		log.Printf("Note: %s provider runs in text-only mode (no tool calling). For full agent capabilities, use an OpenAI-compatible provider.", provider.Name())
 	}
 
-	return &Agent{
+	agent := &Agent{
 		cfg:           cfg,
 		provider:      provider,
 		memory:        mem,
 		sandbox:       sb,
 		skills:        skillRegistry,
+		workspace:     ws,
 		supportsTools: supportsTools,
-	}, nil
+	}
+
+	// Register workspace skills
+	agent.registerWorkspaceSkills()
+
+	// Initialize cron scheduler (uses same SQLite DB)
+	scheduler, err := cron.NewScheduler(mem.DB(), agent.HandleMessage)
+	if err != nil {
+		return nil, fmt.Errorf("initializing cron scheduler: %w", err)
+	}
+	if err := scheduler.Start(); err != nil {
+		log.Printf("Warning: cron scheduler failed to start: %v", err)
+	}
+	agent.scheduler = scheduler
+
+	// Register cron skills
+	agent.registerCronSkills()
+
+	return agent, nil
+}
+
+// registerWorkspaceSkills adds workspace-related skills to the registry.
+func (a *Agent) registerWorkspaceSkills() {
+	a.skills.Register(&skills.Skill{
+		Name:        "workspace_read",
+		Description: "Read a workspace file. Workspace files store persistent information like your identity (IDENTITY.md), user profile (USER.md), behavioral rules (SOUL.md), and operating instructions (AGENTS.md).",
+		Parameters: json.RawMessage(`{
+			"type": "object",
+			"properties": {
+				"filename": {
+					"type": "string",
+					"description": "Name of the workspace file to read (e.g., 'USER.md', 'IDENTITY.md')"
+				}
+			},
+			"required": ["filename"]
+		}`),
+		Handler: func(ctx context.Context, args json.RawMessage) (string, error) {
+			var params struct {
+				Filename string `json:"filename"`
+			}
+			if err := json.Unmarshal(args, &params); err != nil {
+				return "", err
+			}
+			return a.workspace.Read(params.Filename)
+		},
+	})
+
+	a.skills.Register(&skills.Skill{
+		Name:        "workspace_write",
+		Description: "Write or update a workspace file. Use this during bootstrap to save IDENTITY.md and USER.md, or anytime the user wants to update their profile or your personality.",
+		Parameters: json.RawMessage(`{
+			"type": "object",
+			"properties": {
+				"filename": {
+					"type": "string",
+					"description": "Name of the workspace file to write (e.g., 'USER.md', 'IDENTITY.md')"
+				},
+				"content": {
+					"type": "string",
+					"description": "Full content to write to the file (markdown format)"
+				}
+			},
+			"required": ["filename", "content"]
+		}`),
+		Handler: func(ctx context.Context, args json.RawMessage) (string, error) {
+			var params struct {
+				Filename string `json:"filename"`
+				Content  string `json:"content"`
+			}
+			if err := json.Unmarshal(args, &params); err != nil {
+				return "", err
+			}
+			if err := a.workspace.Write(params.Filename, params.Content); err != nil {
+				return "", err
+			}
+			return fmt.Sprintf("Successfully wrote %s", params.Filename), nil
+		},
+	})
+
+	a.skills.Register(&skills.Skill{
+		Name:        "workspace_list",
+		Description: "List all workspace files.",
+		Parameters:  json.RawMessage(`{"type": "object", "properties": {}}`),
+		Handler: func(ctx context.Context, args json.RawMessage) (string, error) {
+			files, err := a.workspace.List()
+			if err != nil {
+				return "", err
+			}
+			result, _ := json.Marshal(files)
+			return string(result), nil
+		},
+	})
+
+	a.skills.Register(&skills.Skill{
+		Name:        "workspace_complete_bootstrap",
+		Description: "Call this after you have finished the bootstrap onboarding conversation and saved IDENTITY.md and USER.md. This removes the bootstrap prompt so normal operation begins.",
+		Parameters:  json.RawMessage(`{"type": "object", "properties": {}}`),
+		Handler: func(ctx context.Context, args json.RawMessage) (string, error) {
+			if err := a.workspace.CompleteBootstrap(); err != nil {
+				return "", err
+			}
+			return "Bootstrap completed! I'm now fully configured and ready to help.", nil
+		},
+	})
+}
+
+// registerCronSkills adds cron-related skills to the registry.
+func (a *Agent) registerCronSkills() {
+	a.skills.Register(&skills.Skill{
+		Name:        "cron_add",
+		Description: "Create a new scheduled task. Use 'cron' type for cron expressions (e.g., '0 7 * * *' for daily at 7am), 'interval' for fixed intervals (e.g., '30m', '1h'), or 'once' for one-shot tasks (RFC3339 time).",
+		Parameters: json.RawMessage(`{
+			"type": "object",
+			"properties": {
+				"name": {
+					"type": "string",
+					"description": "Human-readable name for the job"
+				},
+				"schedule_type": {
+					"type": "string",
+					"enum": ["cron", "interval", "once"],
+					"description": "Type of schedule"
+				},
+				"schedule_expr": {
+					"type": "string",
+					"description": "Schedule expression: cron expression, duration string (e.g., '30m'), or RFC3339 time"
+				},
+				"timezone": {
+					"type": "string",
+					"description": "IANA timezone (e.g., 'America/Chicago'). Defaults to UTC."
+				},
+				"message": {
+					"type": "string",
+					"description": "The prompt/message to send to the agent when the job fires"
+				},
+				"delete_after_run": {
+					"type": "boolean",
+					"description": "If true, delete the job after it runs once (for reminders)"
+				}
+			},
+			"required": ["name", "schedule_type", "schedule_expr", "message"]
+		}`),
+		Handler: func(ctx context.Context, args json.RawMessage) (string, error) {
+			var params struct {
+				Name           string  `json:"name"`
+				ScheduleType   string  `json:"schedule_type"`
+				ScheduleExpr   string  `json:"schedule_expr"`
+				Timezone       string  `json:"timezone"`
+				Message        string  `json:"message"`
+				DeleteAfterRun bool    `json:"delete_after_run"`
+			}
+			if err := json.Unmarshal(args, &params); err != nil {
+				return "", err
+			}
+			job := &cron.Job{
+				Name:           params.Name,
+				ScheduleType:   cron.JobType(params.ScheduleType),
+				ScheduleExpr:   params.ScheduleExpr,
+				Timezone:       params.Timezone,
+				Message:        params.Message,
+				Enabled:        true,
+				DeleteAfterRun: params.DeleteAfterRun,
+			}
+			if err := a.scheduler.CreateJob(job); err != nil {
+				return "", err
+			}
+			return fmt.Sprintf("Created scheduled job '%s' (ID: %d)", job.Name, job.ID), nil
+		},
+	})
+
+	a.skills.Register(&skills.Skill{
+		Name:        "cron_list",
+		Description: "List all scheduled tasks with their status, schedule, and last/next run times.",
+		Parameters:  json.RawMessage(`{"type": "object", "properties": {}}`),
+		Handler: func(ctx context.Context, args json.RawMessage) (string, error) {
+			jobs, err := a.scheduler.ListJobs()
+			if err != nil {
+				return "", err
+			}
+			if len(jobs) == 0 {
+				return "No scheduled tasks.", nil
+			}
+			result, _ := json.Marshal(jobs)
+			return string(result), nil
+		},
+	})
+
+	a.skills.Register(&skills.Skill{
+		Name:        "cron_remove",
+		Description: "Delete a scheduled task by its ID.",
+		Parameters: json.RawMessage(`{
+			"type": "object",
+			"properties": {
+				"job_id": {
+					"type": "integer",
+					"description": "ID of the job to delete"
+				}
+			},
+			"required": ["job_id"]
+		}`),
+		Handler: func(ctx context.Context, args json.RawMessage) (string, error) {
+			var params struct {
+				JobID int64 `json:"job_id"`
+			}
+			if err := json.Unmarshal(args, &params); err != nil {
+				return "", err
+			}
+			if err := a.scheduler.DeleteJob(params.JobID); err != nil {
+				return "", err
+			}
+			return fmt.Sprintf("Deleted job %d", params.JobID), nil
+		},
+	})
+
+	a.skills.Register(&skills.Skill{
+		Name:        "cron_run",
+		Description: "Trigger a scheduled task to run immediately, regardless of its schedule.",
+		Parameters: json.RawMessage(`{
+			"type": "object",
+			"properties": {
+				"job_id": {
+					"type": "integer",
+					"description": "ID of the job to run now"
+				}
+			},
+			"required": ["job_id"]
+		}`),
+		Handler: func(ctx context.Context, args json.RawMessage) (string, error) {
+			var params struct {
+				JobID int64 `json:"job_id"`
+			}
+			if err := json.Unmarshal(args, &params); err != nil {
+				return "", err
+			}
+			if err := a.scheduler.RunNow(params.JobID); err != nil {
+				return "", err
+			}
+			return fmt.Sprintf("Job %d triggered for immediate execution", params.JobID), nil
+		},
+	})
 }
 
 // Stop gracefully shuts down the agent.
 func (a *Agent) Stop() {
+	if a.scheduler != nil {
+		a.scheduler.Stop()
+	}
 	if a.memory != nil {
 		a.memory.Close()
 	}
@@ -107,8 +361,11 @@ func (a *Agent) handleMessage(ctx context.Context, sessionID, userMessage, chann
 		return "", fmt.Errorf("retrieving history: %w", err)
 	}
 
+	// Assemble system prompt: workspace context + base prompt
+	systemPrompt := a.buildSystemPrompt()
+
 	messages := []llm.Message{
-		{Role: "system", Content: a.cfg.SystemPrompt},
+		{Role: "system", Content: systemPrompt},
 	}
 	for _, h := range history {
 		messages = append(messages, llm.Message{
@@ -140,19 +397,9 @@ func (a *Agent) handleMessage(ctx context.Context, sessionID, userMessage, chann
 			return resp.Content, nil
 		}
 
-		// Execute tool calls and build proper message sequence.
-		// Per OpenAI spec:
-		// 1. Add assistant message (with tool_calls metadata serialized in content)
-		// 2. Add tool result messages with role "tool" and matching tool_call_id
-		//
-		// Note: Since our Message struct uses simple string Content, we serialize
-		// tool call info into the content field. The LLM provider layer handles
-		// the proper API formatting.
-
-		// Build assistant message content that includes tool call references
+		// Execute tool calls
 		assistantContent := resp.Content
 		if assistantContent == "" {
-			// When the LLM only returns tool calls with no text, create a summary
 			callNames := make([]string, len(resp.ToolCalls))
 			for j, tc := range resp.ToolCalls {
 				callNames[j] = tc.Name
@@ -172,18 +419,35 @@ func (a *Agent) handleMessage(ctx context.Context, sessionID, userMessage, chann
 				result = fmt.Sprintf("Error executing %s: %v", tc.Name, err)
 			}
 
-			// Add tool result as a properly formatted message.
-			// We use role "user" with a structured prefix because our simple
-			// Message type doesn't have a dedicated tool_call_id field.
-			// The LLM can still understand the context from the structured format.
 			messages = append(messages, llm.Message{
 				Role:    "user",
-				Content: fmt.Sprintf("[Tool result for %s (call_id: %s)]:\n%s", tc.Name, tc.ID, truncate(result, 4000)),
+				Content: fmt.Sprintf("[Tool result for %s (call_id: %s)]:\n%s", tc.Name, tc.ID, truncateStr(result, 4000)),
 			})
 		}
 	}
 
 	return "I've reached the maximum number of tool execution steps. Here's what I've done so far — please let me know if you'd like me to continue.", nil
+}
+
+// buildSystemPrompt assembles the full system prompt from workspace files
+// and the base configuration prompt.
+func (a *Agent) buildSystemPrompt() string {
+	// During bootstrap, use the bootstrap prompt instead
+	if a.workspace.NeedsBootstrap() {
+		bp := a.workspace.BootstrapPrompt()
+		if bp != "" {
+			return bp
+		}
+	}
+
+	// Normal operation: workspace context + base prompt
+	wsContext := a.workspace.SystemContext()
+	basePrompt := a.cfg.SystemPrompt
+
+	if wsContext != "" {
+		return wsContext + "\n\n--- Base Instructions ---\n" + basePrompt
+	}
+	return basePrompt
 }
 
 // HandleMessage is the exported version for use by channel handlers.
@@ -196,11 +460,26 @@ func (a *Agent) Memory() *memory.Store {
 	return a.memory
 }
 
+// Workspace returns the agent's workspace for use by other components.
+func (a *Agent) Workspace() *workspace.Workspace {
+	return a.workspace
+}
+
+// Scheduler returns the agent's cron scheduler for use by other components.
+func (a *Agent) Scheduler() *cron.Scheduler {
+	return a.scheduler
+}
+
+// Skills returns the agent's skill registry.
+func (a *Agent) Skills() *skills.Registry {
+	return a.skills
+}
+
 // HealthCheck returns the agent's health status.
 func (a *Agent) HealthCheck() map[string]interface{} {
 	return map[string]interface{}{
 		"status":        "ok",
-		"version":       "0.1.0",
+		"version":       Version,
 		"provider":      a.provider.Name(),
 		"model":         a.cfg.LLM.Model,
 		"skills":        len(a.skills.AsTools()),
@@ -215,7 +494,7 @@ func (a *Agent) HealthCheckJSON() []byte {
 	return data
 }
 
-func truncate(s string, maxLen int) string {
+func truncateStr(s string, maxLen int) string {
 	if len(s) <= maxLen {
 		return s
 	}

@@ -5,6 +5,7 @@ go 1.24.11
 require (
 	github.com/creativeprojects/go-selfupdate v1.5.2
 	github.com/mattn/go-sqlite3 v1.14.22
+	github.com/robfig/cron/v3 v3.0.1
 )
 
 require (

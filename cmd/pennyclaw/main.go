@@ -8,6 +8,7 @@ import (
 	"log"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"syscall"
 
 	"github.com/mandarl/pennyclaw/internal/agent"
@@ -58,14 +59,24 @@ func main() {
 		log.Println("WARNING: Do NOT use --insecure in production or on a public-facing server.")
 	}
 
-	// Create agent (initializes LLM, memory, sandbox, skills internally)
-	ag, err := agent.New(cfg)
+	// Determine data directory (same parent as the DB path)
+	dataDir := filepath.Dir(cfg.Memory.DBPath)
+	if err := os.MkdirAll(dataDir, 0755); err != nil {
+		log.Fatalf("Failed to create data directory: %v", err)
+	}
+
+	// Set agent version from build-time ldflags
+	agent.Version = version
+
+	// Create agent (initializes LLM, memory, sandbox, skills, workspace, cron)
+	ag, err := agent.New(cfg, dataDir)
 	if err != nil {
 		log.Fatalf("Failed to initialize agent: %v", err)
 	}
 
 	// Start web server
-	srv := web.NewServer(cfg.Server.Host, cfg.Server.Port, ag.HandleMessage, cfg, *configPath, ag.Memory(), version)
+	srv := web.NewServer(cfg.Server.Host, cfg.Server.Port, ag.HandleMessage, cfg, *configPath,
+		ag.Memory(), version, ag.Workspace(), ag.Scheduler())
 	go func() {
 		log.Printf("PennyClaw %s starting on %s:%d", version, cfg.Server.Host, cfg.Server.Port)
 		if err := srv.Start(); err != nil {
@@ -79,6 +90,7 @@ func main() {
 	<-sigCh
 
 	log.Println("Shutting down PennyClaw...")
+	ag.Stop()
 	srv.Stop()
 	log.Println("Goodbye!")
 }
