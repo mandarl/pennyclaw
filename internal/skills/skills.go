@@ -211,14 +211,16 @@ func (r *Registry) registerBuiltins() {
 				return "", err
 			}
 
-			// Safely URL-encode the query parameter
-			searchURL := "https://lite.duckduckgo.com/lite/?q=" + url.QueryEscape(params.Query)
+			// Use DuckDuckGo HTML search with a browser-like User-Agent
+			searchURL := "https://html.duckduckgo.com/html/"
+			formData := url.Values{"q": {params.Query}}
 
-			req, err := http.NewRequestWithContext(ctx, "GET", searchURL, nil)
+			req, err := http.NewRequestWithContext(ctx, "POST", searchURL, strings.NewReader(formData.Encode()))
 			if err != nil {
 				return "", fmt.Errorf("creating search request: %w", err)
 			}
-			req.Header.Set("User-Agent", "PennyClaw/0.1.0")
+			req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+			req.Header.Set("User-Agent", "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
 
 			resp, err := r.client.Do(req)
 			if err != nil {

@@ -133,6 +133,10 @@ type Server struct {
 	health     *health.Checker
 	taskStore  *skills.TaskStore
 	noteStore  *skills.NoteStore
+
+	// SSE notification channels
+	sseClients   map[chan string]bool
+	sseMu        sync.Mutex
 }
 
 // rateLimiter implements a simple per-IP token bucket rate limiter.
@@ -214,6 +218,21 @@ func NewServer(host string, port int, handler MessageHandler, cfg *config.Config
 		s.logf("INFO", "Web UI authentication enabled (token required)")
 	}
 	s.authToken = token
+	s.sseClients = make(map[chan string]bool)
+
+	// Wire cron job completion notifications
+	if sched != nil {
+		sched.SetOnRunComplete(func(job cron.Job, run cron.Run) {
+			notif, _ := json.Marshal(map[string]interface{}{
+				"type":    "cron_complete",
+				"job_id":  job.ID,
+				"job_name": job.Name,
+				"status":  run.Status,
+				"result":  run.Result,
+			})
+			s.broadcastSSE(string(notif))
+		})
+	}
 
 	return s
 }
@@ -277,6 +296,9 @@ func (s *Server) Start() error {
 		WriteTimeout: 120 * time.Second,
 		IdleTimeout:  60 * time.Second,
 	}
+
+	// SSE endpoint for real-time notifications
+	mux.HandleFunc("/api/events", s.handleSSE)
 
 	s.logf("INFO", "Web server starting on %s:%d", s.host, s.port)
 	return s.srv.ListenAndServe()
@@ -1593,5 +1615,66 @@ func truncateLog(s string, maxLen int) string {
 		return s
 	}
 	return s[:maxLen] + "..."
+}
+
+// --- SSE (Server-Sent Events) ---
+
+func (s *Server) broadcastSSE(data string) {
+	s.sseMu.Lock()
+	defer s.sseMu.Unlock()
+	for ch := range s.sseClients {
+		select {
+		case ch <- data:
+		default:
+			// Client too slow, skip
+		}
+	}
+}
+
+func (s *Server) handleSSE(w http.ResponseWriter, r *http.Request) {
+	if !s.requireAuth(w, r) {
+		return
+	}
+
+	flusher, ok := w.(http.Flusher)
+	if !ok {
+		http.Error(w, "Streaming not supported", http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "text/event-stream")
+	w.Header().Set("Cache-Control", "no-cache")
+	w.Header().Set("Connection", "keep-alive")
+	w.Header().Set("Access-Control-Allow-Origin", "*")
+
+	ch := make(chan string, 16)
+	s.sseMu.Lock()
+	s.sseClients[ch] = true
+	s.sseMu.Unlock()
+
+	defer func() {
+		s.sseMu.Lock()
+		delete(s.sseClients, ch)
+		s.sseMu.Unlock()
+		close(ch)
+	}()
+
+	// Send initial keepalive
+	fmt.Fprintf(w, ": keepalive\n\n")
+	flusher.Flush()
+
+	ctx := r.Context()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case msg, ok := <-ch:
+			if !ok {
+				return
+			}
+			fmt.Fprintf(w, "data: %s\n\n", msg)
+			flusher.Flush()
+		}
+	}
 }
 

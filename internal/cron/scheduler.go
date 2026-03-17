@@ -55,13 +55,17 @@ type Run struct {
 type AgentFunc func(ctx context.Context, sessionID, message, channel string) (string, error)
 
 // Scheduler manages cron jobs with SQLite persistence.
+// RunCompleteFunc is called when a cron job finishes execution.
+type RunCompleteFunc func(job Job, run Run)
+
 type Scheduler struct {
-	db        *sql.DB
-	cron      *cronlib.Cron
-	agentFunc AgentFunc
-	mu        sync.Mutex
-	entryMap  map[int64]cronlib.EntryID // jobID -> cron entry ID
-	running   bool
+	db            *sql.DB
+	cron          *cronlib.Cron
+	agentFunc     AgentFunc
+	onRunComplete RunCompleteFunc
+	mu            sync.Mutex
+	entryMap      map[int64]cronlib.EntryID // jobID -> cron entry ID
+	running       bool
 }
 
 // NewScheduler creates a new scheduler. The db should be the same SQLite
@@ -295,6 +299,13 @@ func (s *Scheduler) listJobsLocked() ([]Job, error) {
 	return jobs, nil
 }
 
+// SetOnRunComplete sets a callback that fires when any job finishes.
+func (s *Scheduler) SetOnRunComplete(fn RunCompleteFunc) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.onRunComplete = fn
+}
+
 // RunNow triggers a job immediately, regardless of schedule.
 func (s *Scheduler) RunNow(id int64) error {
 	job, err := s.GetJob(id)
@@ -451,6 +462,21 @@ func (s *Scheduler) executeJob(job Job) {
 	}
 
 	log.Printf("Cron: job %d (%s) completed with status %s", job.ID, job.Name, status)
+
+	// Notify listeners
+	s.mu.Lock()
+	cb := s.onRunComplete
+	s.mu.Unlock()
+	if cb != nil {
+		cb(job, Run{
+			ID:        runID,
+			JobID:     job.ID,
+			StartedAt: now,
+			EndedAt:   &now,
+			Status:    status,
+			Result:    truncate(resultText, 500),
+		})
+	}
 }
 
 // validateSchedule checks that a job's schedule expression is valid.

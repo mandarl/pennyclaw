@@ -118,8 +118,18 @@ const indexHTML = `<!DOCTYPE html>
   .welcome { text-align: center; padding: 60px 24px; }
   .welcome h2 { color: var(--accent); margin-bottom: 8px; }
   .welcome p { color: var(--text3); font-size: 14px; max-width: 400px; margin: 0 auto; }
-  .welcome .shortcuts { margin-top: 24px; font-size: 12px; color: var(--text4); }
+  .welcome .shortcuts { margin-top: 24px; font-size: 12px; color: var(--text4); display: inline-grid; grid-template-columns: auto auto; gap: 6px 24px; text-align: left; }
+  .welcome .shortcuts .sc-item { display: flex; align-items: center; gap: 4px; white-space: nowrap; }
   .welcome .shortcuts kbd { background: var(--bg3); border: 1px solid var(--border2); border-radius: 4px; padding: 2px 6px; font-size: 11px; font-family: monospace; }
+
+  /* Onboarding banner */
+  .onboarding-banner { margin: 0 24px 0; padding: 16px 20px; background: linear-gradient(135deg, rgba(245,166,35,0.12), rgba(245,166,35,0.04)); border: 1px solid rgba(245,166,35,0.3); border-radius: 10px; display: flex; align-items: center; gap: 14px; }
+  .onboarding-banner .ob-icon { font-size: 28px; flex-shrink: 0; }
+  .onboarding-banner .ob-text { flex: 1; }
+  .onboarding-banner .ob-title { font-size: 14px; font-weight: 600; color: var(--accent); margin-bottom: 2px; }
+  .onboarding-banner .ob-desc { font-size: 12px; color: var(--text2); }
+  .onboarding-banner button { background: var(--accent); color: #000; border: none; border-radius: 6px; padding: 8px 16px; font-size: 12px; font-weight: 600; cursor: pointer; white-space: nowrap; }
+  .onboarding-banner button:hover { opacity: 0.85; }
 
   /* Login overlay */
   .login-overlay { position: fixed; inset: 0; background: var(--bg); display: flex; align-items: center; justify-content: center; z-index: 100; }
@@ -477,21 +487,29 @@ const indexHTML = `<!DOCTYPE html>
     <button class="hdr-btn" id="themeBtn" onclick="toggleTheme()" title="Toggle theme">&#x263E;</button>
     <button class="hdr-btn" id="exportBtn" onclick="exportChat()" title="Export chat (Ctrl+E)">Export</button>
   </div>
+  <div id="onboardingBanner" class="onboarding-banner hidden">
+    <div class="ob-icon">&#x1f44b;</div>
+    <div class="ob-text">
+      <div class="ob-title">Welcome! Let's get you set up.</div>
+      <div class="ob-desc">PennyClaw needs to learn about you first. Start a conversation to begin the onboarding process.</div>
+    </div>
+    <button onclick="startOnboarding()">Start Setup</button>
+  </div>
   <div class="chat" id="chat">
     <div class="welcome">
       <h2>Welcome to PennyClaw</h2>
       <p>Your $0/month personal AI agent, running on GCP's free tier. Type a message to get started.</p>
       <div class="shortcuts">
-        <kbd>Ctrl</kbd>+<kbd>K</kbd> New chat &nbsp;
-        <kbd>Ctrl</kbd>+<kbd>L</kbd> Clear &nbsp;
-        <kbd>Ctrl</kbd>+<kbd>E</kbd> Export &nbsp;
-        <kbd>Esc</kbd> Close panels<br>
-        <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>H</kbd> Health &nbsp;
-        <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>T</kbd> Tasks &nbsp;
-        <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>N</kbd> Notes &nbsp;
-        <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>W</kbd> Workspace &nbsp;
-        <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>J</kbd> Scheduler<br>
-        <kbd>Ctrl</kbd>+<kbd>S</kbd> Save note/file
+        <div class="sc-item"><kbd>Ctrl</kbd>+<kbd>K</kbd> New chat</div>
+        <div class="sc-item"><kbd>Ctrl</kbd>+<kbd>L</kbd> Clear</div>
+        <div class="sc-item"><kbd>Ctrl</kbd>+<kbd>E</kbd> Export</div>
+        <div class="sc-item"><kbd>Esc</kbd> Close panels</div>
+        <div class="sc-item"><kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>H</kbd> Health</div>
+        <div class="sc-item"><kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>T</kbd> Tasks</div>
+        <div class="sc-item"><kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>N</kbd> Notes</div>
+        <div class="sc-item"><kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>W</kbd> Workspace</div>
+        <div class="sc-item"><kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>J</kbd> Scheduler</div>
+        <div class="sc-item"><kbd>Ctrl</kbd>+<kbd>S</kbd> Save note/file</div>
       </div>
     </div>
   </div>
@@ -620,17 +638,18 @@ const indexHTML = `<!DOCTYPE html>
         </div>
         <div class="channel-card-body">
           <ol class="setup-steps">
-            <li>For Gmail: enable 2FA, then create an <strong>App Password</strong></li>
+            <li>Use any SMTP provider: <strong>Resend</strong>, <strong>SendGrid</strong>, <strong>Mailgun</strong>, or your own mail server</li>
+            <li>For Gmail: use <a href="https://support.google.com/a/answer/176600" target="_blank" rel="noopener">SMTP relay</a> or an <a href="https://myaccount.google.com/apppasswords" target="_blank" rel="noopener">App Password</a> (requires 2FA)</li>
             <li>Enter your SMTP details below</li>
           </ol>
           <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-top:6px;">
-            <input type="text" id="setSmtpHost" placeholder="SMTP host (smtp.gmail.com)" />
+            <input type="text" id="setSmtpHost" placeholder="SMTP host (e.g. smtp.resend.com)" />
             <input type="number" id="setSmtpPort" placeholder="Port (587)" />
-            <input type="text" id="setSmtpUser" placeholder="Username (you@gmail.com)" />
-            <input type="password" id="setSmtpPass" placeholder="App Password" />
+            <input type="text" id="setSmtpUser" placeholder="Username / API key" />
+            <input type="password" id="setSmtpPass" placeholder="Password / API key" />
           </div>
           <div class="channel-card-actions">
-            <a href="https://myaccount.google.com/apppasswords" target="_blank" rel="noopener">&#x2197; Gmail App Passwords</a>
+            <a href="https://resend.com/signup" target="_blank" rel="noopener">&#x2197; Resend (free tier)</a>
             <button onclick="testEmail()">Test Email</button>
             <button class="primary" onclick="saveEmailConfig()">Save & Enable</button>
           </div>
@@ -1037,14 +1056,16 @@ notifToggle.addEventListener('change', () => {
       input.focus();
       loadSessions();
       startTokenTracking();
+      initSSE(); checkOnboarding();
       return;
     }
-    if (data.valid && authToken) {
+    if (data.valid) {
       loginOverlay.classList.add('hidden');
       $('logoutBtnSidebar').classList.remove('hidden');
       input.focus();
       loadSessions();
       startTokenTracking();
+      initSSE(); checkOnboarding();
       return;
     }
     localStorage.removeItem('pennyclaw_token');
@@ -1077,6 +1098,7 @@ async function doLogin() {
       input.focus();
       loadSessions();
       startTokenTracking();
+      initSSE(); checkOnboarding();
     } else {
       loginError.textContent = 'Invalid token. Check your PENNYCLAW_AUTH_TOKEN value.';
     }
@@ -1175,7 +1197,7 @@ function renderSessions(sessions) {
 function newChat() {
   sessionId = 'web-' + Date.now();
   isWelcome = true;
-  chat.innerHTML = '<div class="welcome"><h2>Welcome to PennyClaw</h2><p>Your $0/month personal AI agent. Type a message to get started.</p><div class="shortcuts"><kbd>Ctrl</kbd>+<kbd>K</kbd> New chat &nbsp;<kbd>Ctrl</kbd>+<kbd>L</kbd> Clear &nbsp;<kbd>Ctrl</kbd>+<kbd>E</kbd> Export &nbsp;<kbd>Esc</kbd> Close panels<br><kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>H</kbd> Health &nbsp;<kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>T</kbd> Tasks &nbsp;<kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>N</kbd> Notes &nbsp;<kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>W</kbd> Workspace &nbsp;<kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>J</kbd> Scheduler<br><kbd>Ctrl</kbd>+<kbd>S</kbd> Save note/file</div></div>';
+  chat.innerHTML = '<div class="welcome"><h2>Welcome to PennyClaw</h2><p>Your $0/month personal AI agent. Type a message to get started.</p><div class="shortcuts"><div class="sc-item"><kbd>Ctrl</kbd>+<kbd>K</kbd> New chat</div><div class="sc-item"><kbd>Ctrl</kbd>+<kbd>L</kbd> Clear</div><div class="sc-item"><kbd>Ctrl</kbd>+<kbd>E</kbd> Export</div><div class="sc-item"><kbd>Esc</kbd> Close panels</div><div class="sc-item"><kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>H</kbd> Health</div><div class="sc-item"><kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>T</kbd> Tasks</div><div class="sc-item"><kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>N</kbd> Notes</div><div class="sc-item"><kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>W</kbd> Workspace</div><div class="sc-item"><kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>J</kbd> Scheduler</div><div class="sc-item"><kbd>Ctrl</kbd>+<kbd>S</kbd> Save note/file</div></div></div>';
   $('chatTitle').textContent = 'New Chat';
   input.focus();
   loadSessions();
@@ -1612,38 +1634,45 @@ function renderHealth(h) {
   const statusLabel = (h.status || 'healthy').charAt(0).toUpperCase() + (h.status || 'healthy').slice(1);
   const sys = h.system || {};
   const ag = h.agent || {};
-  const checks = h.checks || {};
+  const checks = h.checks || [];
 
-  const memPct = sys.memory_used_mb && sys.memory_total_mb ? Math.round(sys.memory_used_mb / sys.memory_total_mb * 100) : 0;
-  const diskPct = sys.disk_used_gb && sys.disk_total_gb ? Math.round(sys.disk_used_gb / sys.disk_total_gb * 100) : 0;
+  // Convert bytes to MB/GB for display
+  const memUsedMB = (sys.mem_alloc_bytes || 0) / (1024 * 1024);
+  const memTotalMB = (sys.mem_sys_bytes || 0) / (1024 * 1024);
+  const diskFreeMB = (sys.disk_free_bytes || 0) / (1024 * 1024);
+  const diskTotalGB = (sys.disk_total_bytes || 0) / (1024 * 1024 * 1024);
+  const diskUsedGB = diskTotalGB - (diskFreeMB / 1024);
+  const memPct = memTotalMB > 0 ? Math.round(memUsedMB / memTotalMB * 100) : 0;
+  const diskPct = diskTotalGB > 0 ? Math.round(diskUsedGB / diskTotalGB * 100) : 0;
   const memClass = memPct > 90 ? 'crit' : memPct > 75 ? 'warn' : 'ok';
   const diskClass = diskPct > 90 ? 'crit' : diskPct > 75 ? 'warn' : 'ok';
 
   let html = '<div class="health-status-banner ' + statusClass + '">';
-  html += statusLabel + ' &mdash; ' + (h.version || 'unknown') + ' (' + (ag.provider || '?') + '/' + (ag.model || '?') + ')';
+  html += statusLabel + ' &mdash; ' + (h.version || 'unknown') + ' (' + (ag.llm_provider || '?') + '/' + (ag.llm_model || '?') + ')';
   html += '</div>';
 
   html += '<div class="health-grid">';
-  html += '<div class="health-card"><div class="hc-label">Memory</div><div class="hc-value">' + (sys.memory_used_mb || 0).toFixed(0) + ' MB</div><div class="hc-sub">of ' + (sys.memory_total_mb || 0).toFixed(0) + ' MB</div><div class="gauge-bar"><div class="gauge-fill ' + memClass + '" style="width:' + memPct + '%"></div></div></div>';
-  html += '<div class="health-card"><div class="hc-label">Disk</div><div class="hc-value">' + (sys.disk_used_gb || 0).toFixed(1) + ' GB</div><div class="hc-sub">of ' + (sys.disk_total_gb || 0).toFixed(1) + ' GB</div><div class="gauge-bar"><div class="gauge-fill ' + diskClass + '" style="width:' + diskPct + '%"></div></div></div>';
+  html += '<div class="health-card"><div class="hc-label">Memory</div><div class="hc-value">' + memUsedMB.toFixed(0) + ' MB</div><div class="hc-sub">of ' + memTotalMB.toFixed(0) + ' MB</div><div class="gauge-bar"><div class="gauge-fill ' + memClass + '" style="width:' + memPct + '%"></div></div></div>';
+  html += '<div class="health-card"><div class="hc-label">Disk</div><div class="hc-value">' + diskUsedGB.toFixed(1) + ' GB</div><div class="hc-sub">of ' + diskTotalGB.toFixed(1) + ' GB</div><div class="gauge-bar"><div class="gauge-fill ' + diskClass + '" style="width:' + diskPct + '%"></div></div></div>';
   html += '<div class="health-card"><div class="hc-label">Goroutines</div><div class="hc-value">' + (sys.goroutines || 0) + '</div><div class="hc-sub">active</div></div>';
-  html += '<div class="health-card"><div class="hc-label">Uptime</div><div class="hc-value">' + formatUptime(sys.uptime_seconds) + '</div><div class="hc-sub">since start</div></div>';
+  html += '<div class="health-card"><div class="hc-label">Uptime</div><div class="hc-value">' + formatUptime(h.uptime_seconds) + '</div><div class="hc-sub">since start</div></div>';
   html += '</div>';
 
   html += '<div class="health-section"><h4>Agent Metrics</h4>';
   html += '<div class="health-row"><span class="hr-label">Total Requests</span><span class="hr-value">' + (ag.total_requests || 0) + '</span></div>';
-  html += '<div class="health-row"><span class="hr-label">Total Errors</span><span class="hr-value" style="color:' + ((ag.total_errors || 0) > 0 ? 'var(--error)' : 'inherit') + '">' + (ag.total_errors || 0) + '</span></div>';
+  html += '<div class="health-row"><span class="hr-label">Total Errors</span><span class="hr-value" style="color:' + ((ag.error_count || 0) > 0 ? 'var(--error)' : 'inherit') + '">' + (ag.error_count || 0) + '</span></div>';
   html += '<div class="health-row"><span class="hr-label">Avg Latency</span><span class="hr-value">' + (ag.avg_latency_ms || 0).toFixed(0) + ' ms</span></div>';
   html += '<div class="health-row"><span class="hr-label">P99 Latency</span><span class="hr-value">' + (ag.p99_latency_ms || 0).toFixed(0) + ' ms</span></div>';
-  html += '<div class="health-row"><span class="hr-label">Skills Loaded</span><span class="hr-value">' + (ag.skills_loaded || 0) + '</span></div>';
+  html += '<div class="health-row"><span class="hr-label">Skills Loaded</span><span class="hr-value">' + (ag.skill_count || 0) + '</span></div>';
   html += '</div>';
 
-  if (checks && Object.keys(checks).length) {
+  if (checks && checks.length) {
     html += '<div class="health-section"><h4>Health Checks</h4>';
-    for (const [name, result] of Object.entries(checks)) {
-      const icon = result === 'ok' ? '\u2713' : result === 'warn' ? '\u26A0' : '\u2717';
-      const color = result === 'ok' ? 'var(--success)' : result === 'warn' ? 'var(--warn)' : 'var(--error)';
-      html += '<div class="health-row"><span class="hr-label">' + escapeHtml(name) + '</span><span class="hr-value" style="color:' + color + '">' + icon + ' ' + result + '</span></div>';
+    for (const check of checks) {
+      const st = check.status || 'healthy';
+      const icon = st === 'healthy' ? '\u2713' : st === 'degraded' ? '\u26A0' : '\u2717';
+      const color = st === 'healthy' ? 'var(--success)' : st === 'degraded' ? 'var(--warn)' : 'var(--error)';
+      html += '<div class="health-row"><span class="hr-label">' + escapeHtml(check.name || '') + '</span><span class="hr-value" style="color:' + color + '">' + icon + ' ' + escapeHtml(check.message || st) + '</span></div>';
     }
     html += '</div>';
   }
@@ -1656,9 +1685,11 @@ function formatUptime(seconds) {
   const d = Math.floor(seconds / 86400);
   const h = Math.floor((seconds % 86400) / 3600);
   const m = Math.floor((seconds % 3600) / 60);
+  const s = Math.floor(seconds % 60);
   if (d > 0) return d + 'd ' + h + 'h';
   if (h > 0) return h + 'h ' + m + 'm';
-  return m + 'm';
+  if (m > 0) return m + 'm ' + s + 's';
+  return s + 's';
 }
 
 // Periodic header health check (every 30s)
@@ -2461,31 +2492,42 @@ async function searchSkills() {
   if (!q) return;
   $('skillSearchResults').innerHTML = '<div class="panel-empty">Searching...</div>';
   try {
-    // Try ClawHub search first
     const res = await apiFetch('/api/skills/search?q=' + encodeURIComponent(q));
     const data = await res.json();
     const results = data.skills || [];
-    if (!results.length) {
-      // If query looks like owner/repo, offer direct install
-      if (q.includes('/')) {
-        $('skillSearchResults').innerHTML = '<div class="panel-empty">No results on ClawHub.<br><button class="btn-primary" style="margin-top:8px;" onclick="installSkill(\'github\', \'' + escapeHtml(q) + '\')">Install from GitHub: ' + escapeHtml(q) + '</button></div>';
-      } else {
-        $('skillSearchResults').innerHTML = '<div class="panel-empty">No skills found for "' + escapeHtml(q) + '".</div>';
-      }
-      return;
+    const hasError = !!data.error;
+    let html = '';
+    // If ClawHub returned results, show them
+    if (results.length) {
+      html = results.map(s => {
+        return '<div class="skill-card">' +
+          '<div class="skill-card-header">' +
+          '<span class="skill-name">' + escapeHtml(s.name || s.Name || '') + '</span>' +
+          '<span class="skill-version">' + escapeHtml(s.version || s.Version || '') + '</span>' +
+          '<button class="btn-primary" style="padding:3px 10px;font-size:11px;" onclick="installSkill(\'clawhub\', \'' + escapeHtml(s.name || s.Name || '') + '\')">Install</button>' +
+          '</div>' +
+          '<div class="skill-desc">' + escapeHtml(s.description || s.Description || '') + '</div>' +
+          '</div>';
+      }).join('');
     }
-    $('skillSearchResults').innerHTML = results.map(s => {
-      return '<div class="skill-card">' +
+    // Always show GitHub install option
+    if (q.includes('/')) {
+      html += '<div class="skill-card" style="border-color:var(--accent);">' +
         '<div class="skill-card-header">' +
-        '<span class="skill-name">' + escapeHtml(s.name || s.Name || '') + '</span>' +
-        '<span class="skill-version">' + escapeHtml(s.version || s.Version || '') + '</span>' +
-        '<button class="btn-primary" style="padding:3px 10px;font-size:11px;" onclick="installSkill(\'clawhub\', \'' + escapeHtml(s.name || s.Name || '') + '\')">Install</button>' +
+        '<span class="skill-name">&#x1F4E6; Install from GitHub</span>' +
+        '<button class="btn-primary" style="padding:3px 10px;font-size:11px;" onclick="installSkill(\'github\', \'' + escapeHtml(q) + '\')">Install</button>' +
         '</div>' +
-        '<div class="skill-desc">' + escapeHtml(s.description || s.Description || '') + '</div>' +
+        '<div class="skill-desc">Install skill directly from GitHub repository: ' + escapeHtml(q) + '</div>' +
         '</div>';
-    }).join('');
+    }
+    if (!html) {
+      html = '<div class="panel-empty">' + (hasError ? 'ClawHub registry is not available yet.' : 'No skills found.') + '<br><span style="font-size:12px;color:var(--text3);">Tip: Enter a GitHub owner/repo (e.g. user/skill-name) to install directly.</span></div>';
+    } else if (hasError) {
+      html = '<div style="padding:6px 10px;font-size:11px;color:var(--text3);border-bottom:1px solid var(--border);">ClawHub registry unavailable &mdash; showing GitHub install option.</div>' + html;
+    }
+    $('skillSearchResults').innerHTML = html;
   } catch (e) {
-    $('skillSearchResults').innerHTML = '<div class="panel-empty">Search failed. Try again.</div>';
+    $('skillSearchResults').innerHTML = '<div class="panel-empty">Search failed.<br><span style="font-size:12px;color:var(--text3);">Tip: Enter a GitHub owner/repo (e.g. user/skill-name) to install directly.</span></div>';
   }
 }
 
@@ -2504,6 +2546,51 @@ async function installSkill(source, identifier) {
     showToast('Installation failed', 'error');
   }
 }
+
+// ===== SSE Real-time Notifications =====
+let sseSource = null;
+function initSSE() {
+  if (!authToken) return;
+  if (sseSource) { try { sseSource.close(); } catch(e) {} }
+  const evtSource = new EventSource('/api/events?token=' + encodeURIComponent(authToken));
+  evtSource.onmessage = function(event) {
+    try {
+      const data = JSON.parse(event.data);
+      if (data.type === 'cron_complete') {
+        const icon = data.status === 'success' ? '\u2705' : '\u274C';
+        showToast(icon + ' Cron job "' + (data.job_name || 'Job #' + data.job_id) + '" ' + data.status, data.status === 'success' ? 'success' : 'error');
+        // Auto-refresh scheduler if panel is open
+        if (!$('schedulerPanel').classList.contains('hidden')) fetchCronJobs();
+      }
+    } catch (e) {}
+  };
+  sseSource = evtSource;
+  evtSource.onerror = function() {
+    // Silently reconnect — EventSource auto-reconnects
+  };
+}
+initSSE();
+
+// ===== Onboarding Detection =====
+async function checkOnboarding() {
+  try {
+    const res = await apiFetch('/api/workspace');
+    const data = await res.json();
+    if (data.needs_bootstrap) {
+      $('onboardingBanner').classList.remove('hidden');
+    } else {
+      $('onboardingBanner').classList.add('hidden');
+    }
+  } catch (e) {}
+}
+function startOnboarding() {
+  $('onboardingBanner').classList.add('hidden');
+  const input = $('input');
+  input.value = 'Hi! I\'d like to set up PennyClaw. Let\'s go through the onboarding process.';
+  sendMessage();
+}
+// Check on page load
+checkOnboarding();
 
 // ===== Keyboard shortcuts (extended) =====
 document.addEventListener('keydown', e => {
