@@ -76,7 +76,7 @@ func main() {
 
 	// Start web server
 	srv := web.NewServer(cfg.Server.Host, cfg.Server.Port, ag.HandleMessage, cfg, *configPath,
-		ag.Memory(), version, ag.Workspace(), ag.Scheduler())
+		ag.Memory(), version, ag.Workspace(), ag.Scheduler(), ag.SkillPack())
 	go func() {
 		log.Printf("PennyClaw %s starting on %s:%d", version, cfg.Server.Host, cfg.Server.Port)
 		if err := srv.Start(); err != nil {

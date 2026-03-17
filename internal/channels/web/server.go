@@ -22,6 +22,7 @@ import (
 	"github.com/mandarl/pennyclaw/internal/config"
 	"github.com/mandarl/pennyclaw/internal/cron"
 	"github.com/mandarl/pennyclaw/internal/memory"
+	"github.com/mandarl/pennyclaw/internal/skillpack"
 	"github.com/mandarl/pennyclaw/internal/workspace"
 )
 
@@ -124,6 +125,7 @@ type Server struct {
 	uploadDir  string
 	workspace  *workspace.Workspace
 	scheduler  *cron.Scheduler
+	skillpack  *skillpack.Loader
 }
 
 // rateLimiter implements a simple per-IP token bucket rate limiter.
@@ -172,7 +174,7 @@ func (s *Server) logf(level, format string, args ...interface{}) {
 }
 
 // NewServer creates a new web UI server.
-func NewServer(host string, port int, handler MessageHandler, cfg *config.Config, cfgPath string, mem *memory.Store, version string, ws *workspace.Workspace, sched *cron.Scheduler) *Server {
+func NewServer(host string, port int, handler MessageHandler, cfg *config.Config, cfgPath string, mem *memory.Store, version string, ws *workspace.Workspace, sched *cron.Scheduler, sp *skillpack.Loader) *Server {
 	s := &Server{
 		host:      host,
 		port:      port,
@@ -186,6 +188,7 @@ func NewServer(host string, port int, handler MessageHandler, cfg *config.Config
 		version:   version,
 		workspace: ws,
 		scheduler: sched,
+		skillpack: sp,
 	}
 
 	// Set up upload directory
@@ -233,6 +236,12 @@ func (s *Server) Start() error {
 	// Cron endpoints
 	mux.HandleFunc("/api/cron", s.handleCronJobs)
 	mux.HandleFunc("/api/cron/", s.handleCronJobByID)
+
+	// Skillpack endpoints
+	mux.HandleFunc("/api/skills", s.handleSkillsList)
+	mux.HandleFunc("/api/skills/install", s.handleSkillsInstall)
+	mux.HandleFunc("/api/skills/search", s.handleSkillsSearch)
+	mux.HandleFunc("/api/skills/", s.handleSkillByName)
 
 	s.srv = &http.Server{
 		Addr:         fmt.Sprintf("%s:%d", s.host, s.port),
@@ -953,6 +962,191 @@ func (s *Server) handleCronJobByID(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 		}
 	}
+}
+
+// --- Skillpack handlers ---
+
+func (s *Server) handleSkillsList(w http.ResponseWriter, r *http.Request) {
+	if !s.requireAuth(w, r) {
+		return
+	}
+	if r.Method != http.MethodGet {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	if s.skillpack == nil {
+		json.NewEncoder(w).Encode(map[string]interface{}{"skills": []interface{}{}, "error": "skillpack not initialized"})
+		return
+	}
+
+	skills := s.skillpack.List()
+	type skillInfo struct {
+		Name        string `json:"name"`
+		Description string `json:"description"`
+		Author      string `json:"author"`
+		Version     string `json:"version"`
+		Bundled     bool   `json:"bundled"`
+		Enabled     bool   `json:"enabled"`
+	}
+
+	result := make([]skillInfo, 0, len(skills))
+	for _, sk := range skills {
+		result = append(result, skillInfo{
+			Name:        sk.Meta.Name,
+			Description: sk.Meta.Description,
+			Author:      sk.Meta.Author,
+			Version:     sk.Meta.Version,
+			Bundled:     sk.Bundled,
+			Enabled:     sk.Enabled,
+		})
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{"skills": result})
+}
+
+func (s *Server) handleSkillByName(w http.ResponseWriter, r *http.Request) {
+	if !s.requireAuth(w, r) {
+		return
+	}
+
+	name := strings.TrimPrefix(r.URL.Path, "/api/skills/")
+	if name == "" || name == "search" || name == "install" {
+		http.Error(w, "Skill name required", http.StatusBadRequest)
+		return
+	}
+
+	if s.skillpack == nil {
+		http.Error(w, "Skillpack not initialized", http.StatusInternalServerError)
+		return
+	}
+
+	switch r.Method {
+	case http.MethodGet:
+		sk, ok := s.skillpack.Get(name)
+		if !ok {
+			http.Error(w, "Skill not found", http.StatusNotFound)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"name":         sk.Meta.Name,
+			"description":  sk.Meta.Description,
+			"author":       sk.Meta.Author,
+			"version":      sk.Meta.Version,
+			"bundled":      sk.Bundled,
+			"enabled":      sk.Enabled,
+			"instructions": sk.Instructions,
+		})
+
+	case http.MethodPut:
+		var body struct {
+			Enabled *bool `json:"enabled"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			http.Error(w, "Invalid JSON", http.StatusBadRequest)
+			return
+		}
+		if body.Enabled != nil {
+			if err := s.skillpack.SetEnabled(name, *body.Enabled); err != nil {
+				http.Error(w, err.Error(), http.StatusBadRequest)
+				return
+			}
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]string{"status": "updated"})
+
+	case http.MethodDelete:
+		if err := s.skillpack.Uninstall(name); err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]string{"status": "uninstalled"})
+
+	default:
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+	}
+}
+
+func (s *Server) handleSkillsSearch(w http.ResponseWriter, r *http.Request) {
+	if !s.requireAuth(w, r) {
+		return
+	}
+	if r.Method != http.MethodGet {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	query := r.URL.Query().Get("q")
+	if query == "" {
+		http.Error(w, "Query parameter 'q' required", http.StatusBadRequest)
+		return
+	}
+
+	client := skillpack.NewClawHubClient()
+	results, err := client.Search(query, 20)
+	if err != nil {
+		s.logf("WARN", "ClawHub search failed: %v", err)
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"skills": []interface{}{},
+			"error":  fmt.Sprintf("ClawHub search failed: %v", err),
+		})
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{"skills": results})
+}
+
+func (s *Server) handleSkillsInstall(w http.ResponseWriter, r *http.Request) {
+	if !s.requireAuth(w, r) {
+		return
+	}
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	if s.skillpack == nil {
+		http.Error(w, "Skillpack not initialized", http.StatusInternalServerError)
+		return
+	}
+
+	var body struct {
+		Source     string `json:"source"`     // "github" or "clawhub"
+		Identifier string `json:"identifier"` // "owner/repo" or skill name
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		http.Error(w, "Invalid JSON", http.StatusBadRequest)
+		return
+	}
+
+	if body.Source == "" || body.Identifier == "" {
+		http.Error(w, "Both 'source' and 'identifier' are required", http.StatusBadRequest)
+		return
+	}
+
+	skill, err := s.skillpack.Install(body.Source, body.Identifier)
+	if err != nil {
+		s.logf("ERROR", "Failed to install skill: %v", err)
+		http.Error(w, fmt.Sprintf("Installation failed: %v", err), http.StatusBadRequest)
+		return
+	}
+
+	s.logf("INFO", "Installed skill: %s from %s", skill.Meta.Name, body.Source)
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"status": "installed",
+		"skill": map[string]interface{}{
+			"name":        skill.Meta.Name,
+			"description": skill.Meta.Description,
+			"author":      skill.Meta.Author,
+			"version":     skill.Meta.Version,
+		},
+	})
 }
 
 // --- Chat handler ---

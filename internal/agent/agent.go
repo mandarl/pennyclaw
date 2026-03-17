@@ -15,6 +15,7 @@ import (
 	"github.com/mandarl/pennyclaw/internal/llm"
 	"github.com/mandarl/pennyclaw/internal/memory"
 	"github.com/mandarl/pennyclaw/internal/sandbox"
+	"github.com/mandarl/pennyclaw/internal/skillpack"
 	"github.com/mandarl/pennyclaw/internal/skills"
 	"github.com/mandarl/pennyclaw/internal/workspace"
 )
@@ -31,6 +32,7 @@ type Agent struct {
 	skills    *skills.Registry
 	workspace *workspace.Workspace
 	scheduler *cron.Scheduler
+	skillpack *skillpack.Loader
 	// supportsTools indicates whether the LLM provider supports tool/function calling.
 	supportsTools bool
 }
@@ -76,7 +78,17 @@ func New(cfg *config.Config, dataDir string) (*Agent, error) {
 
 	// Initialize skills registry
 	skillRegistry := skills.NewRegistry(sb)
-	log.Printf("Loaded %d skills", len(skillRegistry.AsTools()))
+
+	// Initialize skillpack loader (AgentSkills-compatible SKILL.md files)
+	skillsDir := dataDir + "/skills"
+	skillLoader, err := skillpack.NewLoader(skillsDir)
+	if err != nil {
+		log.Printf("Warning: failed to initialize skillpack: %v", err)
+	}
+	if skillLoader != nil {
+		log.Printf("Loaded %d skill packs from %s", len(skillLoader.List()), skillsDir)
+	}
+	log.Printf("Loaded %d built-in skills", len(skillRegistry.AsTools()))
 
 	// Determine tool support based on provider
 	supportsTools := provider.Name() == "openai"
@@ -91,6 +103,7 @@ func New(cfg *config.Config, dataDir string) (*Agent, error) {
 		sandbox:       sb,
 		skills:        skillRegistry,
 		workspace:     ws,
+		skillpack:     skillLoader,
 		supportsTools: supportsTools,
 	}
 
@@ -440,14 +453,27 @@ func (a *Agent) buildSystemPrompt() string {
 		}
 	}
 
-	// Normal operation: workspace context + base prompt
+	// Normal operation: workspace context + skillpack context + base prompt
 	wsContext := a.workspace.SystemContext()
 	basePrompt := a.cfg.SystemPrompt
 
-	if wsContext != "" {
-		return wsContext + "\n\n--- Base Instructions ---\n" + basePrompt
+	var skillpackContext string
+	if a.skillpack != nil {
+		skillpackContext = a.skillpack.SystemPromptSection()
 	}
-	return basePrompt
+
+	var prompt string
+	if wsContext != "" {
+		prompt = wsContext + "\n\n--- Base Instructions ---\n" + basePrompt
+	} else {
+		prompt = basePrompt
+	}
+
+	if skillpackContext != "" {
+		prompt += "\n\n" + skillpackContext
+	}
+
+	return prompt
 }
 
 // HandleMessage is the exported version for use by channel handlers.
@@ -475,6 +501,11 @@ func (a *Agent) Skills() *skills.Registry {
 	return a.skills
 }
 
+// SkillPack returns the agent's skillpack loader.
+func (a *Agent) SkillPack() *skillpack.Loader {
+	return a.skillpack
+}
+
 // HealthCheck returns the agent's health status.
 func (a *Agent) HealthCheck() map[string]interface{} {
 	return map[string]interface{}{
@@ -483,6 +514,7 @@ func (a *Agent) HealthCheck() map[string]interface{} {
 		"provider":      a.provider.Name(),
 		"model":         a.cfg.LLM.Model,
 		"skills":        len(a.skills.AsTools()),
+		"skill_packs":   func() int { if a.skillpack != nil { return len(a.skillpack.List()) }; return 0 }(),
 		"tools_enabled": a.supportsTools,
 		"uptime":        time.Now().Format(time.RFC3339),
 	}
