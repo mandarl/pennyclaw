@@ -12,6 +12,7 @@ import (
 
 	"github.com/mandarl/pennyclaw/internal/config"
 	"github.com/mandarl/pennyclaw/internal/cron"
+	"github.com/mandarl/pennyclaw/internal/health"
 	"github.com/mandarl/pennyclaw/internal/llm"
 	"github.com/mandarl/pennyclaw/internal/memory"
 	"github.com/mandarl/pennyclaw/internal/notify"
@@ -34,6 +35,7 @@ type Agent struct {
 	workspace *workspace.Workspace
 	scheduler *cron.Scheduler
 	skillpack *skillpack.Loader
+	health    *health.Checker
 	// supportsTools indicates whether the LLM provider supports tool/function calling.
 	supportsTools bool
 }
@@ -97,6 +99,9 @@ func New(cfg *config.Config, dataDir string) (*Agent, error) {
 		log.Printf("Note: %s provider runs in text-only mode (no tool calling). For full agent capabilities, use an OpenAI-compatible provider.", provider.Name())
 	}
 
+	// Initialize health checker
+	hc := health.NewChecker(Version, provider.Name(), cfg.LLM.Model, len(skillRegistry.AsTools()))
+
 	agent := &Agent{
 		cfg:           cfg,
 		provider:      provider,
@@ -105,6 +110,7 @@ func New(cfg *config.Config, dataDir string) (*Agent, error) {
 		skills:        skillRegistry,
 		workspace:     ws,
 		skillpack:     skillLoader,
+		health:        hc,
 		supportsTools: supportsTools,
 	}
 
@@ -141,6 +147,9 @@ func New(cfg *config.Config, dataDir string) (*Agent, error) {
 
 	// Register cron skills
 	agent.registerCronSkills()
+
+	// Update skill count now that all skills are registered
+	hc.UpdateSkillCount(len(skillRegistry.AsTools()))
 
 	return agent, nil
 }
@@ -382,6 +391,12 @@ func (a *Agent) Stop() {
 // handleMessage processes an incoming message and returns a response.
 // This is the core agent loop: receive → build context → LLM call → tool exec → respond.
 func (a *Agent) handleMessage(ctx context.Context, sessionID, userMessage, channel string) (string, error) {
+	start := time.Now()
+	a.health.BeginRequest()
+	defer func() {
+		a.health.EndRequest()
+	}()
+
 	// Save user message
 	if err := a.memory.SaveMessage(sessionID, "user", userMessage, channel); err != nil {
 		log.Printf("Warning: failed to save message: %v", err)
@@ -390,6 +405,7 @@ func (a *Agent) handleMessage(ctx context.Context, sessionID, userMessage, chann
 	// Build message context from history
 	history, err := a.memory.GetHistory(sessionID)
 	if err != nil {
+		a.health.RecordRequest(time.Since(start), err)
 		return "", fmt.Errorf("retrieving history: %w", err)
 	}
 
@@ -417,6 +433,7 @@ func (a *Agent) handleMessage(ctx context.Context, sessionID, userMessage, chann
 	for i := 0; i < maxIterations; i++ {
 		resp, err := a.provider.Chat(ctx, messages, tools)
 		if err != nil {
+			a.health.RecordRequest(time.Since(start), err)
 			return "", fmt.Errorf("LLM call failed: %w", err)
 		}
 
@@ -426,6 +443,7 @@ func (a *Agent) handleMessage(ctx context.Context, sessionID, userMessage, chann
 			if err := a.memory.SaveMessage(sessionID, "assistant", resp.Content, channel); err != nil {
 				log.Printf("Warning: failed to save response: %v", err)
 			}
+			a.health.RecordRequest(time.Since(start), nil)
 			return resp.Content, nil
 		}
 
@@ -446,6 +464,7 @@ func (a *Agent) handleMessage(ctx context.Context, sessionID, userMessage, chann
 
 		for _, tc := range resp.ToolCalls {
 			log.Printf("Executing skill: %s (call_id: %s)", tc.Name, tc.ID)
+			a.health.RecordToolCall()
 			result, err := a.skills.Execute(ctx, tc.Name, tc.Arguments)
 			if err != nil {
 				result = fmt.Sprintf("Error executing %s: %v", tc.Name, err)
@@ -458,6 +477,7 @@ func (a *Agent) handleMessage(ctx context.Context, sessionID, userMessage, chann
 		}
 	}
 
+	a.health.RecordRequest(time.Since(start), nil)
 	return "I've reached the maximum number of tool execution steps. Here's what I've done so far — please let me know if you'd like me to continue.", nil
 }
 
@@ -523,6 +543,11 @@ func (a *Agent) Skills() *skills.Registry {
 // SkillPack returns the agent's skillpack loader.
 func (a *Agent) SkillPack() *skillpack.Loader {
 	return a.skillpack
+}
+
+// Health returns the agent's health checker.
+func (a *Agent) Health() *health.Checker {
+	return a.health
 }
 
 // HealthCheck returns the agent's health status.

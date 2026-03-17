@@ -22,6 +22,7 @@ import (
 	"github.com/mandarl/pennyclaw/internal/channels/webhook"
 	"github.com/mandarl/pennyclaw/internal/config"
 	"github.com/mandarl/pennyclaw/internal/cron"
+	"github.com/mandarl/pennyclaw/internal/health"
 	"github.com/mandarl/pennyclaw/internal/memory"
 	"github.com/mandarl/pennyclaw/internal/skillpack"
 	"github.com/mandarl/pennyclaw/internal/workspace"
@@ -128,6 +129,7 @@ type Server struct {
 	scheduler  *cron.Scheduler
 	skillpack  *skillpack.Loader
 	webhook    *webhook.Handler
+	health     *health.Checker
 }
 
 // rateLimiter implements a simple per-IP token bucket rate limiter.
@@ -176,7 +178,7 @@ func (s *Server) logf(level, format string, args ...interface{}) {
 }
 
 // NewServer creates a new web UI server.
-func NewServer(host string, port int, handler MessageHandler, cfg *config.Config, cfgPath string, mem *memory.Store, version string, ws *workspace.Workspace, sched *cron.Scheduler, sp *skillpack.Loader, wh *webhook.Handler) *Server {
+func NewServer(host string, port int, handler MessageHandler, cfg *config.Config, cfgPath string, mem *memory.Store, version string, ws *workspace.Workspace, sched *cron.Scheduler, sp *skillpack.Loader, wh *webhook.Handler, hc *health.Checker) *Server {
 	s := &Server{
 		host:      host,
 		port:      port,
@@ -192,6 +194,7 @@ func NewServer(host string, port int, handler MessageHandler, cfg *config.Config
 		scheduler: sched,
 		skillpack: sp,
 		webhook:   wh,
+		health:    hc,
 	}
 
 	// Set up upload directory
@@ -218,6 +221,7 @@ func (s *Server) Start() error {
 	mux.HandleFunc("/", s.handleIndex)
 	mux.HandleFunc("/api/chat", s.handleChat)
 	mux.HandleFunc("/api/health", s.handleHealth)
+	mux.HandleFunc("/api/metrics", s.handleMetrics)
 	mux.HandleFunc("/api/auth/check", s.handleAuthCheck)
 	mux.HandleFunc("/api/logs", s.handleLogs)
 
@@ -288,8 +292,28 @@ func (s *Server) requireAuth(w http.ResponseWriter, r *http.Request) bool {
 
 func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
+	if s.health != nil {
+		report := s.health.Check()
+		if report.Status == health.StatusUnhealthy {
+			w.WriteHeader(http.StatusServiceUnavailable)
+		} else {
+			w.WriteHeader(http.StatusOK)
+		}
+		json.NewEncoder(w).Encode(report)
+	} else {
+		w.WriteHeader(http.StatusOK)
+		json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
+	}
+}
+
+func (s *Server) handleMetrics(w http.ResponseWriter, r *http.Request) {
+	if s.health == nil {
+		http.Error(w, "metrics not available", http.StatusNotFound)
+		return
+	}
+	w.Header().Set("Content-Type", "text/plain; version=0.0.4; charset=utf-8")
 	w.WriteHeader(http.StatusOK)
-	json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
+	fmt.Fprint(w, s.health.PrometheusMetrics())
 }
 
 func (s *Server) handleAuthCheck(w http.ResponseWriter, r *http.Request) {

@@ -1,4 +1,4 @@
-# 🪙 PennyClaw
+# PennyClaw
 
 **Your $0/month personal AI agent, running 24/7 on GCP's free tier.**
 
@@ -9,7 +9,7 @@
 
 ---
 
-PennyClaw is a lightweight, open-source AI agent built from scratch in Go, designed to run comfortably within the constraints of Google Cloud Platform's **Always Free** `e2-micro` VM (1GB RAM, 2 shared vCPUs, 30GB disk). One click deploys it. Zero dollars keeps it running — as long as GCP's free tier exists.
+PennyClaw is a lightweight, open-source AI agent built from scratch in Go, designed to run comfortably within the constraints of Google Cloud Platform's **Always Free** `e2-micro` VM (1GB RAM, 2 shared vCPUs, 30GB disk). One click deploys it. Zero dollars keeps it running.
 
 ## Why PennyClaw?
 
@@ -20,7 +20,8 @@ Most self-hosted AI agents assume you have a beefy VPS. PennyClaw is purpose-bui
 | **RAM Usage** | 500 MB - 4 GB | **< 50 MB idle** |
 | **Monthly Cost** | $5-20/mo VPS | **$0/mo** (GCP free tier) |
 | **Deployment** | Docker + config | **One click** |
-| **Language** | Python/TypeScript | **Go** (single binary) |
+| **Binary** | Python/TypeScript + deps | **Single Go binary (~16 MB)** |
+| **External deps** | Redis, Postgres, etc. | **Zero** (SQLite embedded) |
 
 > *"I was tired of paying for servers I barely use. GCP gives everyone a free VM — so I built an agent that fits inside it."*
 
@@ -40,13 +41,13 @@ Click the button below to deploy PennyClaw to your own GCP free-tier VM in under
 
 The deployment script includes **24 pre-flight checks** to ensure you stay within the free tier:
 
-- ✅ Detects existing e2-micro instances (only 1 is free)
-- ✅ Validates region eligibility (us-west1, us-central1, us-east1)
-- ✅ Guards against premium network tier charges
-- ✅ Verifies disk type and size limits
-- ✅ Shows a $0.00 cost breakdown before deploying
-- ✅ Auto-configures swap for ~1.5GB effective RAM
-- ✅ Generates a one-command teardown script
+- Detects existing e2-micro instances (only 1 is free)
+- Validates region eligibility (us-west1, us-central1, us-east1)
+- Guards against premium network tier charges
+- Verifies disk type and size limits
+- Shows a $0.00 cost breakdown before deploying
+- Auto-configures swap for ~1.5GB effective RAM
+- Generates a one-command teardown script
 
 ### Option 2: Run Locally
 
@@ -77,72 +78,197 @@ docker run -p 3000:3000 \
 
 ## Features
 
-### Core
+### Agent Core
+
+PennyClaw implements a complete agent loop: receive user message, build context from conversation history, call the LLM, execute tool calls, and repeat until a text response is produced. The agent supports up to 10 tool-calling iterations per request.
+
 - **Multi-provider LLM gateway** — OpenAI, Anthropic, Google Gemini, OpenRouter, and any OpenAI-compatible API
 - **Persistent memory** — SQLite-backed conversation history that survives restarts
-- **Tool execution** — Sandboxed shell commands, file I/O, web search, HTTP requests
-- **Web chat UI** — Full-featured embedded interface with Markdown rendering, syntax highlighting, and dark/light themes
 - **Session management** — Create, switch, and delete conversations with sidebar navigation
-- **In-browser logs viewer** — Slide-out panel with color-coded log levels, auto-refresh, no SSH needed
-- **Settings panel** — Change model, API key, temperature, system prompt from the UI (no SSH required)
-- **Self-update** — Check for and install updates directly from the web UI
-- **Copy code blocks** — One-click copy button on all code blocks in assistant responses
-- **Export chat** — Download conversations as Markdown files
-- **File upload** — Drag-and-drop files into the chat for the agent to process
 - **Token tracking** — Monitor cumulative token usage across sessions
-- **Keyboard shortcuts** — Ctrl+K (new chat), Ctrl+L (clear), Ctrl+E (export), Esc (close panels)
-- **Notification sound** — Optional audio ping when responses arrive
-- **Mobile responsive** — Full sidebar and panel support on mobile devices
+
+### Built-in Skills
+
+PennyClaw ships with a comprehensive set of tools the agent can invoke:
+
+| Category | Skill | Description |
+|---|---|---|
+| **System** | `run_command` | Execute sandboxed shell commands |
+| **Files** | `read_file` | Read file contents from the workspace |
+| **Files** | `write_file` | Create or overwrite files |
+| **Web** | `web_search` | Search the web via DuckDuckGo |
+| **Web** | `http_request` | Make HTTP requests to APIs (with SSRF protection) |
+| **Tasks** | `task_add` | Create tasks with priority, due date, and tags |
+| **Tasks** | `task_list` | List and filter tasks by status, priority, or tag |
+| **Tasks** | `task_update` | Update task status, priority, title, or notes |
+| **Tasks** | `task_delete` | Remove tasks by ID |
+| **Notes** | `note_save` | Save markdown notes to a persistent knowledge base |
+| **Notes** | `note_read` | Read a specific note |
+| **Notes** | `note_list` | List all notes with metadata |
+| **Notes** | `note_delete` | Remove notes |
+| **Notes** | `note_search` | Full-text search with snippet extraction |
+| **Email** | `send_email` | Send email notifications via SMTP |
+
+Skills can also be loaded from external YAML/JSON bundles via the skill pack system, allowing you to extend PennyClaw without modifying Go code.
+
+### Communication Channels
+
+PennyClaw supports multiple ways to interact with the agent:
+
+| Channel | Description |
+|---|---|
+| **Web UI** | Full-featured embedded chat with Markdown rendering, syntax highlighting, dark/light themes, file upload, keyboard shortcuts, and mobile support |
+| **Telegram Bot** | Long-polling bot with chat ID allowlist, Markdown formatting, and automatic message chunking for long responses |
+| **Webhook Endpoint** | HTTP endpoint for external services (GitHub, IFTTT, Zapier) with HMAC-SHA256 signature verification, sync and async modes |
+| **Discord Bot** | Planned (channel config exists, bot implementation coming) |
+
+### Web UI Features
+
+The embedded web interface includes:
+
+- In-browser logs viewer with color-coded log levels and auto-refresh
+- Settings panel to change model, API key, temperature, and system prompt (no SSH required)
+- Self-update mechanism to check for and install updates from the UI
+- One-click copy on all code blocks
+- Export conversations as Markdown files
+- Drag-and-drop file upload
+- Notification sound when responses arrive
+- Keyboard shortcuts: Ctrl+K (new chat), Ctrl+L (clear), Ctrl+E (export), Esc (close panels)
+
+### Automation
+
+- **Cron scheduler** — Schedule recurring tasks with cron expressions (e.g., daily summaries, periodic checks)
+- **Workspace** — Persistent file workspace with bootstrap scripts that run on first message
+
+### Observability
+
+PennyClaw exposes detailed health and performance metrics:
+
+- **`GET /api/health`** — JSON report with system metrics (memory, CPU, goroutines, disk, GC stats), agent metrics (request count, latency P99, error rate, active requests), and individual health checks with status thresholds
+- **`GET /api/metrics`** — Prometheus-compatible text exposition format for scraping
+- **Structured logging** — JSON lines output with log levels (DEBUG/INFO/WARN/ERROR), component prefixes, caller info for errors, and key-value fields
+
+### Security
+
+- **Secure-by-default auth** — Auto-generates an auth token on startup if none is set
+- **Login screen** — Web UI prompts for token, stores in localStorage, sends as Bearer token
+- **Rate limiting** — 20 requests per minute per IP on the chat endpoint
+- **Native Linux sandboxing** — Namespaces and cgroups, no Docker daemon overhead
+- **Non-root execution** — Runs as dedicated `pennyclaw` user
+- **systemd hardening** — `ProtectSystem=strict`, `NoNewPrivileges`, `PrivateTmp`
+- **Memory limits** — Cgroup-enforced 800MB ceiling prevents OOM kills
+- **Path traversal protection** — File skills restricted to sandbox directory; note names sanitized
+- **SSRF protection** — HTTP request skill blocks internal IPs, loopback, and cloud metadata endpoints
+- **Webhook signature verification** — HMAC-SHA256 (GitHub `X-Hub-Signature-256` compatible)
+- **Telegram chat allowlist** — Restrict bot access to specific chat IDs
+- **Config validation** — Startup checks catch common mistakes (missing keys, invalid ports, unresolved env vars) with actionable error messages
 
 ### Deployment
+
 - **One-click GCP deploy** — Guided Cloud Shell tutorial with automated setup
 - **24 pre-flight checks** — Validates free tier eligibility before spending a cent
 - **Auto-swap config** — 512MB swap file extends effective RAM to ~1.5GB
 - **systemd service** — Auto-restarts on crash, starts on boot
 - **Unattended upgrades** — Automatic security patches
-
-### Security
-- **Native Linux sandboxing** — Namespaces and cgroups, no Docker daemon overhead
-- **Non-root execution** — Runs as dedicated `pennyclaw` user
-- **systemd hardening** — `ProtectSystem=strict`, `NoNewPrivileges`, `PrivateTmp`
-- **Memory limits** — Cgroup-enforced 800MB ceiling prevents OOM kills
+- **Docker support** — Multi-stage Dockerfile for containerized deployment
 
 ## Architecture
 
 ```mermaid
 graph TD
-    subgraph Channels["🔌 Channels"]
+    subgraph Channels["Channels"]
         direction LR
-        WEB["🌐 Web UI · :3000"]
-        TG["📱 Telegram Bot"]
-        DC["🎮 Discord Bot"]
+        WEB["Web UI :3000"]
+        TG["Telegram Bot"]
+        WH["Webhook Endpoint"]
     end
 
-    AGENT["🔄 Agent Loop"]
+    subgraph Core["Agent Core"]
+        AGENT["Agent Loop"]
+        HEALTH["Health Checker"]
+        LOG["Structured Logger"]
+    end
 
-    LLM["🧠 LLM Gateway\nOpenAI · Anthropic · Gemini · OpenRouter"]
-    SKILLS["🛠️ Skills\nshell · files · web · search · http"]
-    SANDBOX["🔒 Sandbox\nnamespaces · cgroups · non-root"]
-    SQLITE["🗄️ SQLite\nconversation memory"]
+    subgraph Intelligence["Intelligence"]
+        LLM["LLM Gateway<br/>OpenAI / Anthropic / Gemini / OpenRouter"]
+        SKILLS["Skills Registry<br/>shell / files / web / tasks / notes / email"]
+        SKILLPACK["Skill Packs<br/>YAML/JSON bundles"]
+    end
+
+    subgraph Storage["Storage"]
+        SQLITE["SQLite<br/>conversations + memory"]
+        TASKS["JSON<br/>task store"]
+        NOTES["Markdown<br/>knowledge base"]
+        WORKSPACE["Workspace<br/>persistent files"]
+    end
+
+    subgraph Infra["Infrastructure"]
+        SANDBOX["Sandbox<br/>namespaces + cgroups"]
+        CRON["Cron Scheduler"]
+        EMAIL["Email Notifier<br/>SMTP"]
+        VALIDATE["Config Validator"]
+    end
 
     WEB --> AGENT
     TG --> AGENT
-    DC --> AGENT
+    WH --> AGENT
     AGENT --> LLM
     AGENT --> SKILLS
-    AGENT -.-> SQLITE
+    AGENT --> HEALTH
+    AGENT --> LOG
+    SKILLS --> SKILLPACK
     SKILLS --> SANDBOX
+    SKILLS --> TASKS
+    SKILLS --> NOTES
+    SKILLS --> EMAIL
+    AGENT --> SQLITE
+    AGENT --> WORKSPACE
+    AGENT --> CRON
+    VALIDATE -.-> AGENT
 
     style Channels fill:#064e3b,stroke:#34d399,stroke-width:2px,color:#34d399
-    style WEB fill:#065f46,stroke:#6ee7b7,color:#fff
-    style TG fill:#065f46,stroke:#6ee7b7,color:#fff
-    style DC fill:#065f46,stroke:#6ee7b7,color:#fff
-    style AGENT fill:#7c3aed,stroke:#c4b5fd,stroke-width:3px,color:#fff
-    style LLM fill:#1e40af,stroke:#93c5fd,stroke-width:2px,color:#fff
-    style SKILLS fill:#1e40af,stroke:#93c5fd,stroke-width:2px,color:#fff
-    style SANDBOX fill:#991b1b,stroke:#fca5a5,stroke-width:2px,color:#fff
-    style SQLITE fill:#92400e,stroke:#fcd34d,stroke-width:2px,color:#fff
+    style Core fill:#7c3aed,stroke:#c4b5fd,stroke-width:2px,color:#fff
+    style Intelligence fill:#1e40af,stroke:#93c5fd,stroke-width:2px,color:#fff
+    style Storage fill:#92400e,stroke:#fcd34d,stroke-width:2px,color:#fff
+    style Infra fill:#991b1b,stroke:#fca5a5,stroke-width:2px,color:#fff
 ```
+
+### Package Structure
+
+```
+cmd/pennyclaw/          Main entry point, CLI flags, signal handling
+internal/
+  agent/                Agent loop: context building, LLM calls, tool execution
+  channels/
+    web/                HTTP server, web UI (embedded HTML), REST API
+    telegram/           Telegram bot (long polling, no external deps)
+    webhook/            Webhook endpoint with HMAC-SHA256 verification
+  config/               Config loading, env var resolution, validation
+  cron/                 Cron scheduler for recurring tasks
+  health/               Health checks, system metrics, Prometheus endpoint
+  llm/                  Multi-provider LLM gateway (OpenAI, Anthropic, Gemini)
+  logging/              Structured leveled logger (JSON or human-readable)
+  memory/               SQLite-backed conversation store
+  notify/               Email notifications via SMTP
+  sandbox/              Linux namespace/cgroup sandboxing for tool execution
+  skillpack/            External skill loader (YAML/JSON bundles)
+  skills/               Skill registry, built-in skills, productivity tools
+  workspace/            Persistent file workspace with bootstrap support
+scripts/                Deployment and teardown scripts
+docs/                   Deploy tutorial, assets
+```
+
+### Data Flow
+
+1. A message arrives via one of the channels (web UI, Telegram, or webhook).
+2. The agent saves the message to SQLite and builds a context window from conversation history.
+3. The system prompt is assembled from the base prompt plus workspace context.
+4. The LLM is called with the message history and available tools.
+5. If the LLM returns tool calls, the agent executes each skill and feeds results back.
+6. Steps 4-5 repeat (up to 10 iterations) until the LLM returns a text response.
+7. The response is saved to memory and returned to the channel.
+
+Throughout this process, the health checker tracks request latency, error rates, and tool call counts. The structured logger records events at the configured level.
 
 ## GCP Free Tier Specs
 
@@ -159,7 +285,9 @@ PennyClaw is architected for these exact constraints:
 
 ## Configuration
 
-PennyClaw uses a single `config.json` file:
+PennyClaw uses a single `config.json` file. Environment variables prefixed with `$` are automatically resolved at startup.
+
+### Minimal Config
 
 ```json
 {
@@ -167,15 +295,103 @@ PennyClaw uses a single `config.json` file:
     "provider": "openai",
     "model": "gpt-4.1-mini",
     "api_key": "$OPENAI_API_KEY"
-  },
-  "channels": {
-    "web": { "enabled": true },
-    "telegram": { "enabled": false, "token": "$TELEGRAM_BOT_TOKEN" }
   }
 }
 ```
 
-Environment variables prefixed with `$` are automatically resolved.
+Everything else uses sensible defaults (web UI on port 3000, SQLite in `data/`, sandbox enabled).
+
+### Full Config Reference
+
+```json
+{
+  "server": {
+    "host": "0.0.0.0",
+    "port": 3000
+  },
+  "llm": {
+    "provider": "openai",
+    "model": "gpt-4.1-mini",
+    "api_key": "$OPENAI_API_KEY",
+    "base_url": "",
+    "max_tokens": 4096,
+    "temperature": 0.7
+  },
+  "channels": {
+    "web": {
+      "enabled": true
+    },
+    "telegram": {
+      "enabled": false,
+      "token": "$TELEGRAM_BOT_TOKEN"
+    },
+    "discord": {
+      "enabled": false,
+      "token": "$DISCORD_BOT_TOKEN"
+    },
+    "webhook": {
+      "enabled": false,
+      "secret": "$WEBHOOK_SECRET"
+    }
+  },
+  "memory": {
+    "db_path": "data/pennyclaw.db",
+    "max_history": 50,
+    "persist_sessions": true
+  },
+  "sandbox": {
+    "enabled": true,
+    "work_dir": "/tmp/pennyclaw-sandbox",
+    "max_timeout": 30,
+    "max_memory": 128
+  },
+  "email": {
+    "enabled": false,
+    "smtp_host": "smtp.gmail.com",
+    "smtp_port": 587,
+    "username": "you@gmail.com",
+    "password": "$GMAIL_APP_PASSWORD",
+    "from_address": "you@gmail.com",
+    "from_name": "PennyClaw"
+  },
+  "system_prompt": "You are PennyClaw, a helpful personal AI assistant."
+}
+```
+
+### Config Field Reference
+
+| Section | Field | Type | Default | Description |
+|---|---|---|---|---|
+| `server` | `host` | string | `"0.0.0.0"` | Bind address |
+| `server` | `port` | int | `3000` | HTTP port (1-65535) |
+| `llm` | `provider` | string | `"openai"` | `openai`, `anthropic`, `gemini`, or `openai-compatible` |
+| `llm` | `model` | string | `"gpt-4.1-mini"` | Model identifier |
+| `llm` | `api_key` | string | `"$OPENAI_API_KEY"` | API key or `$ENV_VAR` reference |
+| `llm` | `base_url` | string | `""` | Custom endpoint for OpenAI-compatible APIs |
+| `llm` | `max_tokens` | int | `4096` | Max tokens per response (1-128000) |
+| `llm` | `temperature` | float | `0.7` | Sampling temperature (0-2) |
+| `channels.web` | `enabled` | bool | `true` | Enable the web UI |
+| `channels.telegram` | `enabled` | bool | `false` | Enable Telegram bot |
+| `channels.telegram` | `token` | string | `""` | Bot token from @BotFather |
+| `channels.discord` | `enabled` | bool | `false` | Enable Discord bot |
+| `channels.discord` | `token` | string | `""` | Discord bot token |
+| `channels.webhook` | `enabled` | bool | `false` | Enable webhook endpoint at `/api/webhooks` |
+| `channels.webhook` | `secret` | string | `""` | HMAC-SHA256 secret for signature verification |
+| `memory` | `db_path` | string | `"data/pennyclaw.db"` | SQLite database path |
+| `memory` | `max_history` | int | `50` | Messages to include in LLM context (1-500) |
+| `memory` | `persist_sessions` | bool | `true` | Persist sessions across restarts |
+| `sandbox` | `enabled` | bool | `true` | Enable sandboxed command execution |
+| `sandbox` | `work_dir` | string | `"/tmp/pennyclaw-sandbox"` | Sandbox working directory |
+| `sandbox` | `max_timeout` | int | `30` | Max command execution time (seconds) |
+| `sandbox` | `max_memory` | int | `128` | Max memory for sandboxed processes (MB) |
+| `email` | `enabled` | bool | `false` | Enable email notifications |
+| `email` | `smtp_host` | string | `""` | SMTP server hostname |
+| `email` | `smtp_port` | int | `587` | SMTP port (1-65535) |
+| `email` | `username` | string | `""` | SMTP username |
+| `email` | `password` | string | `""` | SMTP password or `$ENV_VAR` reference |
+| `email` | `from_address` | string | `""` | Sender email (defaults to username) |
+| `email` | `from_name` | string | `"PennyClaw"` | Sender display name |
+| | `system_prompt` | string | *(built-in)* | Custom system prompt for the agent |
 
 ### OpenRouter / Custom Providers
 
@@ -192,17 +408,40 @@ PennyClaw works with any OpenAI-compatible API. To use OpenRouter:
 }
 ```
 
+You can also use `"provider": "openai-compatible"` for any endpoint that follows the OpenAI chat completions format.
+
+### Config Validation
+
+PennyClaw validates the configuration at startup and provides actionable error messages:
+
+```
+config validation failed:
+  - llm.api_key references env var $OPENAI_API_KEY which is not set; export it before starting PennyClaw
+  - channels.telegram.token is required when Telegram is enabled
+  - email.smtp_port must be between 1 and 65535, got 0
+```
+
+## API Endpoints
+
+| Method | Path | Description |
+|---|---|---|
+| `GET` | `/` | Web UI |
+| `POST` | `/api/chat` | Send a message (rate limited: 20/min/IP) |
+| `GET` | `/api/sessions` | List all sessions |
+| `POST` | `/api/sessions` | Create a new session |
+| `DELETE` | `/api/sessions/:id` | Delete a session |
+| `GET` | `/api/history/:id` | Get conversation history |
+| `GET` | `/api/health` | Health check with system and agent metrics |
+| `GET` | `/api/metrics` | Prometheus-compatible metrics |
+| `GET` | `/api/logs` | Recent log entries |
+| `GET` | `/api/config` | Current configuration (sensitive fields redacted) |
+| `PUT` | `/api/config` | Update configuration |
+| `POST` | `/api/webhooks` | Webhook endpoint (when enabled) |
+| `POST` | `/api/upload` | File upload |
+
 ## Security
 
 PennyClaw includes multiple layers of security, but **it is not a hardened production system**. Use it for personal automation, not for handling sensitive data.
-
-- **Secure-by-default auth:** If no `PENNYCLAW_AUTH_TOKEN` is set, PennyClaw auto-generates one on startup and prints it to the log. Use `--insecure` to explicitly opt out.
-- **Login screen:** The web UI shows a login prompt, stores the token in localStorage, and sends it as a `Bearer` token with every request
-- **Rate limiting:** 20 requests per minute per IP on the chat endpoint
-- **Path traversal protection:** File read/write skills are restricted to the sandbox directory
-- **SSRF protection:** HTTP request skill blocks internal IPs, loopback, and cloud metadata endpoints
-- **Sandbox isolation:** Tool execution runs in a restricted environment with namespace isolation (when running as root)
-- **systemd hardening:** `ProtectSystem=strict`, `NoNewPrivileges=true`, memory limits
 
 ```bash
 # Set a custom auth token
@@ -218,98 +457,66 @@ export PENNYCLAW_AUTH_TOKEN=$(openssl rand -hex 32)
 
 PennyClaw listens on `localhost:3000` by default. Since GCP e2-micro VMs don't have public HTTPS, here are the recommended access methods:
 
-#### Method 1: SSH Tunnel (Recommended — Zero Config)
-
-The simplest and most secure approach. No firewall rules, no domain, no certificates:
+**Method 1: SSH Tunnel (Recommended)**
 
 ```bash
-# From your local machine:
 gcloud compute ssh pennyclaw-vm \
   --zone=us-central1-a \
   --ssh-flag="-L 3000:localhost:3000"
-
-# Then open http://localhost:3000 in your browser
+# Then open http://localhost:3000
 ```
 
-This creates an encrypted tunnel from your machine to the VM. The web UI is never exposed to the internet.
-
-#### Method 2: Caddy Reverse Proxy (HTTPS with Let's Encrypt)
-
-If you have a domain and want public HTTPS access:
+**Method 2: Caddy Reverse Proxy (HTTPS)**
 
 ```bash
-# Install Caddy on the VM
 sudo apt install -y caddy
-
-# Create Caddyfile
-sudo tee /etc/caddy/Caddyfile << 'EOF'
-your-domain.com {
-    reverse_proxy localhost:3000
-}
-EOF
-
-# Restart Caddy (auto-obtains Let's Encrypt certificate)
+echo 'your-domain.com { reverse_proxy localhost:3000 }' | sudo tee /etc/caddy/Caddyfile
 sudo systemctl restart caddy
 ```
 
-Caddy automatically provisions and renews TLS certificates. You'll also need to open port 443:
+**Method 3: Cloudflare Tunnel (No Open Ports)**
 
 ```bash
-gcloud compute firewall-rules create allow-https \
-  --allow=tcp:443 --target-tags=pennyclaw
-```
-
-#### Method 3: Cloudflare Tunnel (No Open Ports)
-
-For public access without opening any firewall ports:
-
-```bash
-# Install cloudflared
-curl -L https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64 -o cloudflared
-sudo mv cloudflared /usr/local/bin/ && sudo chmod +x /usr/local/bin/cloudflared
-
-# Quick tunnel (generates a random *.trycloudflare.com URL)
 cloudflared tunnel --url http://localhost:3000
 ```
-
-> **Note:** The SSH tunnel method uses zero additional resources and is ideal for the e2-micro's constrained environment.
-
-## Built-in Skills
-
-| Skill | Description |
-|---|---|
-| `run_command` | Execute sandboxed shell commands |
-| `read_file` | Read file contents |
-| `write_file` | Create or overwrite files |
-| `web_search` | Search the web via DuckDuckGo |
-| `http_request` | Make HTTP requests to APIs |
 
 ## Pre-Flight Checks
 
 Run `make preflight` to validate your GCP setup without deploying:
 
 ```
-━━━ PHASE 1: GCP Account & Authentication ━━━
-  ✓  gcloud CLI installed (462.0.1)
-  ✓  Authenticated as: user@gmail.com
-  ✓  Project: my-project-123
-  ✓  Billing is enabled
+PHASE 1: GCP Account & Authentication
+  gcloud CLI installed (462.0.1)
+  Authenticated as: user@gmail.com
 
-━━━ PHASE 2: Free Tier Eligibility ━━━
-  ✓  No existing e2-micro instances — you're eligible!
-  ✓  No existing disks — full 30GB available
+PHASE 2: Free Tier Eligibility
+  No existing e2-micro instances
 
-━━━ PHASE 3: Region Selection ━━━
-  ✓  Selected: us-central1 (42ms latency)
+PHASE 3: Region Selection
+  Selected: us-central1 (42ms latency)
 
-━━━ PHASE 4: Cost Protection ━━━
-  ✓  Machine type: e2-micro
-  ✓  Disk: 30GB pd-standard
-  ✓  Network: STANDARD tier
+PHASE 4: Cost Protection
+  Machine type: e2-micro
+  Disk: 30GB pd-standard
+  Network: STANDARD tier
 
-━━━ PHASE 5: Cost Summary ━━━
-  TOTAL: $0.00/month ✓
+PHASE 5: Cost Summary
+  TOTAL: $0.00/month
 ```
+
+## Build Targets
+
+| Target | Command | Description |
+|---|---|---|
+| Build | `make build` | Compile the binary to `bin/pennyclaw` |
+| Run | `make run` | Build and run locally |
+| Test | `make test` | Run all tests with race detector |
+| Docker | `make docker` | Build Docker image |
+| Deploy | `make deploy` | Deploy to GCP free tier (interactive) |
+| Teardown | `make teardown` | Remove PennyClaw from GCP |
+| Preflight | `make preflight` | Run pre-flight checks only |
+| Logs | `make logs` | View service logs (on GCP VM) |
+| Help | `make help` | Show all available targets |
 
 ## Teardown
 
@@ -330,17 +537,11 @@ PennyClaw is a weekend project that solves a specific problem (free self-hosted 
 - **GCP free tier constraints:** The e2-micro VM is slow. Expect 2-5 second response times. CPU-intensive tasks may hit the shared vCPU limit.
 - **No streaming:** Responses are returned all at once, not streamed token-by-token.
 - **Basic sandboxing:** The sandbox provides isolation but is not a security boundary. Do not expose to untrusted users.
-- **GCP free tier may change:** Google could modify or discontinue the Always Free tier at any time. PennyClaw has no control over this.
+- **GCP free tier may change:** Google could modify or discontinue the Always Free tier at any time.
 
 ## Contributing
 
-PennyClaw is MIT licensed. Contributions welcome!
-
-1. Fork the repo
-2. Create a feature branch
-3. Make your changes
-4. Run `make test`
-5. Submit a PR
+See [CONTRIBUTING.md](CONTRIBUTING.md) for development setup, code style, and contribution guidelines.
 
 ## License
 
