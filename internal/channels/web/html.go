@@ -55,7 +55,7 @@ const indexHTML = `<!DOCTYPE html>
   .header .toggle-sidebar:hover { color: var(--accent); }
   .header .title { font-size: 15px; font-weight: 600; color: var(--text); flex: 1; }
   .header .status { font-size: 12px; color: var(--success); display: flex; align-items: center; gap: 6px; }
-  .header .status::before { content: ''; width: 7px; height: 7px; background: var(--success); border-radius: 50%; }
+  .header .status::before { content: ''; width: 7px; height: 7px; background: currentColor; border-radius: 50%; }
   .hdr-btn { background: none; border: 1px solid var(--border2); border-radius: 6px; padding: 4px 10px; color: var(--text2); font-size: 12px; cursor: pointer; transition: all 0.15s; }
   .hdr-btn:hover { border-color: var(--accent); color: var(--accent); }
   .hdr-btn.active { border-color: var(--accent); color: var(--accent); background: var(--accent-bg); }
@@ -193,6 +193,221 @@ const indexHTML = `<!DOCTYPE html>
   .upgrade-btn:disabled { opacity: 0.4; cursor: not-allowed; }
   .upgrade-status { font-size: 12px; color: var(--text2); margin-top: 8px; text-align: center; }
 
+  /* Toast notifications */
+  .toast-container { position: fixed; top: 16px; right: 16px; z-index: 200; display: flex; flex-direction: column; gap: 8px; }
+  .toast { padding: 10px 16px; border-radius: 8px; font-size: 13px; color: var(--text); background: var(--bg2); border: 1px solid var(--border2); box-shadow: 0 4px 12px rgba(0,0,0,0.3); animation: toastIn 0.25s ease; max-width: 360px; display: flex; align-items: center; gap: 8px; }
+  .toast.success { border-color: var(--success); }
+  .toast.error { border-color: var(--error); }
+  .toast.info { border-color: var(--accent); }
+  .toast-icon { font-size: 16px; flex-shrink: 0; }
+  @keyframes toastIn { from { opacity: 0; transform: translateX(20px); } to { opacity: 1; transform: translateX(0); } }
+
+  /* Health panel */
+  .health-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 16px; }
+  .health-card { background: var(--bg3); border: 1px solid var(--border); border-radius: 8px; padding: 14px; }
+  .health-card .hc-label { font-size: 11px; color: var(--text3); text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 6px; }
+  .health-card .hc-value { font-size: 22px; font-weight: 700; color: var(--text); font-family: 'SF Mono', monospace; }
+  .health-card .hc-sub { font-size: 11px; color: var(--text4); margin-top: 4px; }
+  .gauge-bar { height: 6px; background: var(--bg); border-radius: 3px; margin-top: 8px; overflow: hidden; }
+  .gauge-fill { height: 100%; border-radius: 3px; transition: width 0.5s ease; }
+  .gauge-fill.ok { background: var(--success); }
+  .gauge-fill.warn { background: var(--warn); }
+  .gauge-fill.crit { background: var(--error); }
+  .health-status-banner { padding: 10px 14px; border-radius: 8px; font-size: 13px; font-weight: 500; margin-bottom: 16px; display: flex; align-items: center; gap: 8px; }
+  .health-status-banner.healthy { background: rgba(76,175,80,0.1); color: var(--success); border: 1px solid rgba(76,175,80,0.2); }
+  .health-status-banner.degraded { background: rgba(245,166,35,0.1); color: var(--warn); border: 1px solid rgba(245,166,35,0.2); }
+  .health-status-banner.unhealthy { background: rgba(239,68,68,0.1); color: var(--error); border: 1px solid rgba(239,68,68,0.2); }
+  .health-section { margin-bottom: 16px; }
+  .health-section h4 { font-size: 12px; font-weight: 600; color: var(--text2); text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 10px; }
+  .health-row { display: flex; justify-content: space-between; align-items: center; padding: 6px 0; font-size: 13px; border-bottom: 1px solid var(--border); }
+  .health-row:last-child { border-bottom: none; }
+  .health-row .hr-label { color: var(--text2); }
+  .health-row .hr-value { color: var(--text); font-family: monospace; font-size: 12px; }
+
+  /* Task panel */
+  .task-add-bar { display: flex; gap: 8px; margin-bottom: 16px; }
+  .task-add-bar input { flex: 1; background: var(--bg3); border: 1px solid var(--border2); border-radius: 6px; padding: 8px 12px; color: var(--text); font-size: 13px; outline: none; }
+  .task-add-bar input:focus { border-color: var(--accent); }
+  .task-add-bar button { background: var(--accent); color: #000; border: none; border-radius: 6px; padding: 8px 14px; font-size: 13px; font-weight: 600; cursor: pointer; white-space: nowrap; }
+  .task-add-bar button:hover { opacity: 0.85; }
+  .task-filters { display: flex; gap: 6px; margin-bottom: 12px; flex-wrap: wrap; }
+  .task-filter { background: var(--bg3); border: 1px solid var(--border2); border-radius: 6px; padding: 4px 10px; font-size: 11px; color: var(--text2); cursor: pointer; transition: all 0.15s; }
+  .task-filter:hover { border-color: var(--accent); color: var(--accent); }
+  .task-filter.active { background: var(--accent-bg); border-color: var(--accent); color: var(--accent); }
+  .task-card { background: var(--bg3); border: 1px solid var(--border); border-radius: 8px; padding: 12px; margin-bottom: 8px; transition: all 0.15s; }
+  .task-card:hover { border-color: var(--border2); }
+  .task-card.done { opacity: 0.5; }
+  .task-card-header { display: flex; align-items: center; gap: 8px; }
+  .task-check { width: 18px; height: 18px; border-radius: 4px; border: 2px solid var(--border2); cursor: pointer; display: flex; align-items: center; justify-content: center; flex-shrink: 0; transition: all 0.15s; font-size: 11px; }
+  .task-check:hover { border-color: var(--accent); }
+  .task-check.checked { background: var(--success); border-color: var(--success); color: #fff; }
+  .task-title { flex: 1; font-size: 13px; color: var(--text); }
+  .task-card.done .task-title { text-decoration: line-through; color: var(--text3); }
+  .task-priority { font-size: 10px; font-weight: 600; padding: 2px 6px; border-radius: 4px; text-transform: uppercase; }
+  .task-priority.high { background: rgba(239,68,68,0.15); color: var(--error); }
+  .task-priority.medium { background: rgba(245,166,35,0.15); color: var(--warn); }
+  .task-priority.low { background: rgba(76,175,80,0.15); color: var(--success); }
+  .task-meta { display: flex; gap: 8px; margin-top: 6px; padding-left: 26px; flex-wrap: wrap; }
+  .task-tag { font-size: 10px; background: var(--accent-bg); color: var(--accent); padding: 1px 6px; border-radius: 3px; }
+  .task-due { font-size: 11px; color: var(--text3); }
+  .task-actions { display: flex; gap: 4px; flex-shrink: 0; }
+  .task-actions button { background: none; border: none; color: var(--text4); cursor: pointer; font-size: 14px; padding: 2px; transition: color 0.15s; }
+  .task-actions button:hover { color: var(--error); }
+  .task-empty { text-align: center; padding: 40px 20px; color: var(--text4); font-size: 13px; }
+
+  /* Notes panel */
+  .notes-layout { display: flex; flex-direction: column; height: 100%; }
+  .notes-toolbar { display: flex; gap: 8px; margin-bottom: 12px; }
+  .notes-toolbar input { flex: 1; background: var(--bg3); border: 1px solid var(--border2); border-radius: 6px; padding: 8px 12px; color: var(--text); font-size: 13px; outline: none; }
+  .notes-toolbar input:focus { border-color: var(--accent); }
+  .notes-toolbar button { background: var(--accent); color: #000; border: none; border-radius: 6px; padding: 8px 14px; font-size: 13px; font-weight: 600; cursor: pointer; white-space: nowrap; }
+  .notes-toolbar button:hover { opacity: 0.85; }
+  .notes-list { margin-bottom: 12px; }
+  .note-item { display: flex; align-items: center; justify-content: space-between; padding: 8px 12px; border-radius: 6px; cursor: pointer; font-size: 13px; color: var(--text2); transition: all 0.15s; margin-bottom: 2px; }
+  .note-item:hover { background: var(--bg3); color: var(--text); }
+  .note-item.active { background: var(--accent-bg); color: var(--accent); }
+  .note-item-info { display: flex; flex-direction: column; flex: 1; min-width: 0; }
+  .note-item-name { font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .note-item-meta { font-size: 11px; color: var(--text4); }
+  .note-item-actions { display: flex; gap: 4px; }
+  .note-item-actions button { background: none; border: none; color: var(--text4); cursor: pointer; font-size: 14px; padding: 2px; }
+  .note-item-actions button:hover { color: var(--error); }
+  .note-editor-area { flex: 1; display: flex; flex-direction: column; }
+  .note-editor-header { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
+  .note-editor-header input { flex: 1; background: var(--bg3); border: 1px solid var(--border2); border-radius: 6px; padding: 6px 10px; color: var(--text); font-size: 13px; font-weight: 500; outline: none; }
+  .note-editor-header input:focus { border-color: var(--accent); }
+  .note-editor-tabs { display: flex; gap: 4px; margin-bottom: 8px; }
+  .note-editor-tab { padding: 4px 10px; border-radius: 4px; font-size: 11px; color: var(--text3); cursor: pointer; transition: all 0.15s; }
+  .note-editor-tab:hover { color: var(--text); }
+  .note-editor-tab.active { background: var(--accent-bg); color: var(--accent); }
+  .note-textarea { flex: 1; background: var(--bg3); border: 1px solid var(--border2); border-radius: 6px; padding: 12px; color: var(--text); font-size: 13px; font-family: 'SF Mono', 'Fira Code', monospace; outline: none; resize: none; min-height: 200px; }
+  .note-textarea:focus { border-color: var(--accent); }
+  .note-preview { flex: 1; background: var(--bg3); border: 1px solid var(--border); border-radius: 6px; padding: 12px; overflow-y: auto; min-height: 200px; font-size: 13px; line-height: 1.6; }
+  .note-preview h1, .note-preview h2, .note-preview h3 { color: var(--accent); margin: 0.5em 0 0.3em; }
+  .note-preview p { margin: 0.4em 0; }
+  .note-preview code { background: var(--code-bg); padding: 2px 6px; border-radius: 4px; font-size: 12px; }
+  .note-preview pre { background: var(--code-bg); padding: 10px; border-radius: 6px; overflow-x: auto; margin: 8px 0; }
+  .note-preview pre code { background: none; padding: 0; }
+  .note-empty { text-align: center; padding: 40px 20px; color: var(--text4); font-size: 13px; }
+
+  /* Workspace panel */
+  .ws-file-list { margin-bottom: 12px; }
+  .ws-file { display: flex; align-items: center; justify-content: space-between; padding: 8px 12px; border-radius: 6px; cursor: pointer; font-size: 13px; color: var(--text2); transition: all 0.15s; margin-bottom: 2px; }
+  .ws-file:hover { background: var(--bg3); color: var(--text); }
+  .ws-file.active { background: var(--accent-bg); color: var(--accent); }
+  .ws-file-name { font-family: 'SF Mono', monospace; font-size: 12px; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .ws-file-actions { display: flex; gap: 4px; }
+  .ws-file-actions button { background: none; border: none; color: var(--text4); cursor: pointer; font-size: 14px; padding: 2px; }
+  .ws-file-actions button:hover { color: var(--error); }
+  .ws-editor { flex: 1; display: flex; flex-direction: column; }
+  .ws-editor-header { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; font-size: 13px; color: var(--text2); }
+  .ws-editor-header strong { color: var(--text); font-family: monospace; }
+  .ws-editor textarea { flex: 1; background: var(--bg3); border: 1px solid var(--border2); border-radius: 6px; padding: 12px; color: var(--text); font-size: 12px; font-family: 'SF Mono', 'Fira Code', monospace; outline: none; resize: none; min-height: 300px; line-height: 1.6; }
+  .ws-editor textarea:focus { border-color: var(--accent); }
+  .ws-bootstrap-banner { padding: 10px 14px; border-radius: 8px; background: rgba(245,166,35,0.1); border: 1px solid rgba(245,166,35,0.2); color: var(--warn); font-size: 12px; margin-bottom: 12px; display: flex; align-items: center; gap: 8px; }
+  .ws-bootstrap-banner button { background: var(--accent); color: #000; border: none; border-radius: 4px; padding: 4px 10px; font-size: 11px; font-weight: 600; cursor: pointer; }
+
+  /* Cron panel */
+  .cron-job-card { background: var(--bg3); border: 1px solid var(--border); border-radius: 8px; padding: 12px; margin-bottom: 8px; }
+  .cron-job-header { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; }
+  .cron-job-name { font-size: 13px; font-weight: 600; color: var(--text); flex: 1; }
+  .cron-job-badge { font-size: 10px; font-weight: 600; padding: 2px 6px; border-radius: 4px; text-transform: uppercase; }
+  .cron-job-badge.enabled { background: rgba(76,175,80,0.15); color: var(--success); }
+  .cron-job-badge.disabled { background: rgba(128,128,128,0.15); color: var(--text3); }
+  .cron-job-schedule { font-size: 12px; color: var(--text2); font-family: monospace; margin-bottom: 4px; }
+  .cron-job-message { font-size: 12px; color: var(--text3); margin-bottom: 6px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .cron-job-meta { display: flex; gap: 12px; font-size: 11px; color: var(--text4); }
+  .cron-job-actions { display: flex; gap: 4px; }
+  .cron-job-actions button { background: none; border: 1px solid var(--border2); border-radius: 4px; padding: 3px 8px; font-size: 11px; color: var(--text2); cursor: pointer; transition: all 0.15s; }
+  .cron-job-actions button:hover { border-color: var(--accent); color: var(--accent); }
+  .cron-job-actions button.danger:hover { border-color: var(--error); color: var(--error); }
+  .cron-form { background: var(--bg3); border: 1px solid var(--border); border-radius: 8px; padding: 16px; margin-bottom: 16px; }
+  .cron-form h4 { font-size: 12px; font-weight: 600; color: var(--text2); margin-bottom: 12px; }
+  .cron-form-row { margin-bottom: 10px; }
+  .cron-form-row label { display: block; font-size: 11px; color: var(--text3); margin-bottom: 4px; }
+  .cron-form-row input, .cron-form-row select, .cron-form-row textarea { width: 100%; background: var(--bg); border: 1px solid var(--border2); border-radius: 6px; padding: 6px 10px; color: var(--text); font-size: 12px; outline: none; font-family: inherit; }
+  .cron-form-row input:focus, .cron-form-row select:focus, .cron-form-row textarea:focus { border-color: var(--accent); }
+  .cron-form-row textarea { min-height: 60px; resize: vertical; }
+  .cron-form-actions { display: flex; gap: 8px; }
+  .cron-runs { margin-top: 8px; }
+  .cron-run { display: flex; align-items: center; gap: 8px; padding: 4px 0; font-size: 11px; border-bottom: 1px solid var(--border); }
+  .cron-run:last-child { border-bottom: none; }
+  .cron-run-status { font-weight: 600; }
+  .cron-run-status.success { color: var(--success); }
+  .cron-run-status.error { color: var(--error); }
+  .cron-run-status.running { color: var(--accent); }
+  .cron-run-time { color: var(--text4); }
+  .cron-run-result { color: var(--text3); flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+  /* Skills panel */
+  .skill-card { background: var(--bg3); border: 1px solid var(--border); border-radius: 8px; padding: 12px; margin-bottom: 8px; }
+  .skill-card-header { display: flex; align-items: center; gap: 8px; margin-bottom: 4px; }
+  .skill-name { font-size: 13px; font-weight: 600; color: var(--text); flex: 1; }
+  .skill-version { font-size: 10px; color: var(--text4); font-family: monospace; }
+  .skill-badge { font-size: 10px; font-weight: 600; padding: 2px 6px; border-radius: 4px; }
+  .skill-badge.bundled { background: rgba(245,166,35,0.15); color: var(--accent); }
+  .skill-badge.installed { background: rgba(76,175,80,0.15); color: var(--success); }
+  .skill-desc { font-size: 12px; color: var(--text3); margin-bottom: 6px; }
+  .skill-author { font-size: 11px; color: var(--text4); }
+  .skill-actions { display: flex; gap: 4px; align-items: center; }
+  .skill-toggle { position: relative; width: 36px; height: 20px; cursor: pointer; }
+  .skill-toggle input { opacity: 0; width: 0; height: 0; }
+  .skill-toggle .slider { position: absolute; inset: 0; background: var(--border2); border-radius: 10px; transition: 0.2s; }
+  .skill-toggle .slider::before { content: ''; position: absolute; width: 16px; height: 16px; border-radius: 50%; background: var(--text); bottom: 2px; left: 2px; transition: 0.2s; }
+  .skill-toggle input:checked + .slider { background: var(--success); }
+  .skill-toggle input:checked + .slider::before { transform: translateX(16px); }
+  .skill-search-results { margin-top: 12px; }
+  .skill-install-form { display: flex; gap: 8px; margin-bottom: 12px; }
+  .skill-install-form input { flex: 1; background: var(--bg3); border: 1px solid var(--border2); border-radius: 6px; padding: 8px 12px; color: var(--text); font-size: 13px; outline: none; }
+  .skill-install-form input:focus { border-color: var(--accent); }
+  .skill-install-form button { background: var(--accent); color: #000; border: none; border-radius: 6px; padding: 8px 14px; font-size: 13px; font-weight: 600; cursor: pointer; white-space: nowrap; }
+  .skill-tabs { display: flex; gap: 4px; margin-bottom: 12px; }
+  .skill-tab { padding: 6px 12px; border-radius: 6px; font-size: 12px; color: var(--text2); cursor: pointer; transition: all 0.15s; }
+  .skill-tab:hover { color: var(--text); }
+  .skill-tab.active { background: var(--accent-bg); color: var(--accent); }
+
+  /* Channel config cards */
+  .channel-card { background: var(--bg3); border: 1px solid var(--border); border-radius: 8px; padding: 14px; margin-bottom: 10px; }
+  .channel-card-header { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
+  .channel-card-icon { font-size: 18px; }
+  .channel-card-name { font-size: 13px; font-weight: 600; color: var(--text); flex: 1; }
+  .channel-card-status { font-size: 10px; font-weight: 600; padding: 2px 8px; border-radius: 4px; }
+  .channel-card-status.connected { background: rgba(76,175,80,0.15); color: var(--success); }
+  .channel-card-status.disconnected { background: rgba(128,128,128,0.15); color: var(--text3); }
+  .channel-card-body { font-size: 12px; color: var(--text3); }
+  .channel-card-body .setup-steps { margin: 8px 0; padding: 0; list-style: none; counter-reset: step; }
+  .channel-card-body .setup-steps li { counter-increment: step; padding: 4px 0 4px 24px; position: relative; }
+  .channel-card-body .setup-steps li::before { content: counter(step); position: absolute; left: 0; top: 4px; width: 18px; height: 18px; border-radius: 50%; background: var(--accent-bg); color: var(--accent); font-size: 10px; font-weight: 700; display: flex; align-items: center; justify-content: center; }
+  .channel-card-body input { width: 100%; background: var(--bg); border: 1px solid var(--border2); border-radius: 6px; padding: 6px 10px; color: var(--text); font-size: 12px; outline: none; margin-top: 4px; }
+  .channel-card-body input:focus { border-color: var(--accent); }
+  .channel-card-actions { display: flex; gap: 6px; margin-top: 8px; }
+  .channel-card-actions button { font-size: 11px; padding: 4px 10px; border-radius: 4px; cursor: pointer; border: 1px solid var(--border2); background: none; color: var(--text2); transition: all 0.15s; }
+  .channel-card-actions button:hover { border-color: var(--accent); color: var(--accent); }
+  .channel-card-actions button.primary { background: var(--accent); color: #000; border-color: var(--accent); }
+  .channel-card-actions button.primary:hover { opacity: 0.9; }
+  .channel-card-actions a { font-size: 11px; padding: 4px 10px; border-radius: 4px; cursor: pointer; border: 1px solid var(--border2); background: none; color: var(--text2); transition: all 0.15s; text-decoration: none; display: inline-flex; align-items: center; gap: 4px; }
+  .channel-card-actions a:hover { border-color: var(--accent); color: var(--accent); }
+  .webhook-url-box { display: flex; gap: 4px; margin-top: 6px; }
+  .webhook-url-box input { flex: 1; font-family: monospace; font-size: 11px; }
+  .webhook-url-box button { background: var(--bg3); border: 1px solid var(--border2); border-radius: 4px; padding: 4px 8px; font-size: 11px; color: var(--text2); cursor: pointer; white-space: nowrap; }
+  .webhook-url-box button:hover { color: var(--accent); border-color: var(--accent); }
+
+  /* Mobile responsive for new panels */
+  @media (max-width: 768px) {
+    .cron-job-meta { flex-wrap: wrap; }
+    .cron-form-actions { flex-direction: column; }
+    .skill-install-form { flex-direction: column; }
+    .skill-install-form button { width: 100%; }
+    .ws-editor textarea { min-height: 200px; }
+    .channel-card-actions { flex-wrap: wrap; }
+  }
+
+  /* Sidebar tools section */
+  .sidebar-tools { padding: 8px 16px; border-top: 1px solid var(--border); }
+  .sidebar-tools-label { font-size: 10px; font-weight: 600; color: var(--text4); text-transform: uppercase; letter-spacing: 0.5px; padding: 4px 8px; }
+  .sidebar-tools button { width: 100%; background: none; border: none; color: var(--text2); cursor: pointer; font-size: 12px; padding: 6px 8px; border-radius: 6px; text-align: left; transition: all 0.15s; display: flex; align-items: center; gap: 8px; }
+  .sidebar-tools button:hover { background: var(--bg3); color: var(--text); }
+
   /* Backdrop */
   .backdrop { position: fixed; inset: 0; background: rgba(0,0,0,0.5); z-index: 49; opacity: 0; pointer-events: none; transition: opacity 0.25s ease; }
   .backdrop.open { opacity: 1; pointer-events: auto; }
@@ -235,6 +450,15 @@ const indexHTML = `<!DOCTYPE html>
   </div>
   <button class="new-chat-btn" onclick="newChat()">+ New Chat</button>
   <div class="session-list" id="sessionList"></div>
+  <div class="sidebar-tools">
+    <div class="sidebar-tools-label">Tools</div>
+    <button onclick="openPanel('health')">&#x1f4ca; Health</button>
+    <button onclick="openPanel('tasks')">&#x2611; Tasks <span id="taskBadge" style="font-size:10px;background:var(--accent-bg);color:var(--accent);padding:1px 5px;border-radius:3px;margin-left:auto;"></span></button>
+    <button onclick="openPanel('notes')">&#x1f4dd; Notes</button>
+    <button onclick="openPanel('workspace')">&#x1f4c1; Workspace</button>
+    <button onclick="openPanel('scheduler')">&#x23f0; Scheduler</button>
+    <button onclick="openPanel('skills')">&#x1f9e9; Skills</button>
+  </div>
   <div class="sidebar-footer">
     <div class="token-display" id="tokenDisplay"></div>
     <button onclick="openPanel('settings')">&#x2699; Settings</button>
@@ -249,7 +473,7 @@ const indexHTML = `<!DOCTYPE html>
   <div class="header">
     <button class="toggle-sidebar" onclick="toggleSidebar()" title="Toggle sidebar">&#x2630;</button>
     <div class="title" id="chatTitle">New Chat</div>
-    <div class="status">Online</div>
+    <div class="status" id="headerStatus" onclick="openPanel('health')" style="cursor:pointer;" title="Click for health details">Online</div>
     <button class="hdr-btn" id="themeBtn" onclick="toggleTheme()" title="Toggle theme">&#x263E;</button>
     <button class="hdr-btn" id="exportBtn" onclick="exportChat()" title="Export chat (Ctrl+E)">Export</button>
   </div>
@@ -261,7 +485,13 @@ const indexHTML = `<!DOCTYPE html>
         <kbd>Ctrl</kbd>+<kbd>K</kbd> New chat &nbsp;
         <kbd>Ctrl</kbd>+<kbd>L</kbd> Clear &nbsp;
         <kbd>Ctrl</kbd>+<kbd>E</kbd> Export &nbsp;
-        <kbd>Esc</kbd> Close panels
+        <kbd>Esc</kbd> Close panels<br>
+        <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>H</kbd> Health &nbsp;
+        <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>T</kbd> Tasks &nbsp;
+        <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>N</kbd> Notes &nbsp;
+        <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>W</kbd> Workspace &nbsp;
+        <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>J</kbd> Scheduler<br>
+        <kbd>Ctrl</kbd>+<kbd>S</kbd> Save note/file
       </div>
     </div>
   </div>
@@ -356,6 +586,102 @@ const indexHTML = `<!DOCTYPE html>
       </div>
     </div>
 
+    <!-- Channels & Integrations -->
+    <div class="setting-group">
+      <h4>Channels & Integrations</h4>
+
+      <!-- Telegram -->
+      <div class="channel-card" id="channelTelegram">
+        <div class="channel-card-header">
+          <span class="channel-card-icon">&#x2708;</span>
+          <span class="channel-card-name">Telegram</span>
+          <span class="channel-card-status disconnected" id="telegramStatus">Not Connected</span>
+        </div>
+        <div class="channel-card-body">
+          <ol class="setup-steps">
+            <li>Open Telegram and message <strong>@BotFather</strong></li>
+            <li>Send <code>/newbot</code> and follow the prompts</li>
+            <li>Copy the bot token and paste it below</li>
+          </ol>
+          <input type="password" id="setTelegramToken" placeholder="Paste your Telegram bot token here" />
+          <div class="channel-card-actions">
+            <a href="https://t.me/BotFather" target="_blank" rel="noopener">&#x2197; Open BotFather</a>
+            <button class="primary" onclick="saveTelegramToken()">Save & Enable</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Email / SMTP -->
+      <div class="channel-card" id="channelEmail">
+        <div class="channel-card-header">
+          <span class="channel-card-icon">&#x2709;</span>
+          <span class="channel-card-name">Email (SMTP)</span>
+          <span class="channel-card-status disconnected" id="emailStatus">Not Configured</span>
+        </div>
+        <div class="channel-card-body">
+          <ol class="setup-steps">
+            <li>For Gmail: enable 2FA, then create an <strong>App Password</strong></li>
+            <li>Enter your SMTP details below</li>
+          </ol>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-top:6px;">
+            <input type="text" id="setSmtpHost" placeholder="SMTP host (smtp.gmail.com)" />
+            <input type="number" id="setSmtpPort" placeholder="Port (587)" />
+            <input type="text" id="setSmtpUser" placeholder="Username (you@gmail.com)" />
+            <input type="password" id="setSmtpPass" placeholder="App Password" />
+          </div>
+          <div class="channel-card-actions">
+            <a href="https://myaccount.google.com/apppasswords" target="_blank" rel="noopener">&#x2197; Gmail App Passwords</a>
+            <button onclick="testEmail()">Test Email</button>
+            <button class="primary" onclick="saveEmailConfig()">Save & Enable</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Webhook -->
+      <div class="channel-card" id="channelWebhook">
+        <div class="channel-card-header">
+          <span class="channel-card-icon">&#x1f517;</span>
+          <span class="channel-card-name">Webhook</span>
+          <span class="channel-card-status disconnected" id="webhookStatus">Not Configured</span>
+        </div>
+        <div class="channel-card-body">
+          <p>Receive events from external services (GitHub, Stripe, etc.) via HTTP POST.</p>
+          <div class="webhook-url-box">
+            <input type="text" id="webhookUrl" readonly />
+            <button onclick="copyWebhookUrl()">Copy</button>
+          </div>
+          <div style="margin-top:6px;">
+            <input type="password" id="setWebhookSecret" placeholder="HMAC secret (optional, for signature verification)" />
+          </div>
+          <div class="channel-card-actions">
+            <button class="primary" onclick="saveWebhookConfig()">Save & Enable</button>
+            <button onclick="testWebhook()">Send Test</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Discord -->
+      <div class="channel-card" id="channelDiscord">
+        <div class="channel-card-header">
+          <span class="channel-card-icon">&#x1f3ae;</span>
+          <span class="channel-card-name">Discord</span>
+          <span class="channel-card-status disconnected" id="discordStatus">Not Connected</span>
+        </div>
+        <div class="channel-card-body">
+          <ol class="setup-steps">
+            <li>Go to the <strong>Discord Developer Portal</strong></li>
+            <li>Create a new application and add a Bot</li>
+            <li>Copy the bot token and paste it below</li>
+          </ol>
+          <input type="password" id="setDiscordToken" placeholder="Paste your Discord bot token here" />
+          <div class="channel-card-actions">
+            <a href="https://discord.com/developers/applications" target="_blank" rel="noopener">&#x2197; Discord Developer Portal</a>
+            <button class="primary" onclick="saveDiscordToken()">Save & Enable</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
     <!-- System Prompt -->
     <div class="setting-group">
       <h4>System Prompt</h4>
@@ -370,6 +696,231 @@ const indexHTML = `<!DOCTYPE html>
       <span class="setting-saved" id="settingSaved">&#x2713; Saved!</span>
     </div>
     <div class="setting-note" style="margin-top: 12px;">Some changes (provider, API key) require a server restart to take effect.</div>
+  </div>
+</div>
+
+<!-- Workspace panel -->
+<div class="panel" id="workspacePanel">
+  <div class="panel-header">
+    <h3>Workspace</h3>
+    <div class="panel-header-btns">
+      <button id="wsBackBtn" class="hidden" onclick="wsBackToList()">Back</button>
+      <button id="wsSaveBtn" class="hidden" onclick="wsSaveFile()">Save</button>
+      <button onclick="fetchWorkspace()">Refresh</button>
+      <button onclick="closeAllPanels()">Close</button>
+    </div>
+  </div>
+  <div class="panel-content" id="workspaceContent">
+    <div id="wsListView">
+      <div id="wsBootstrapBanner" class="hidden">
+        <div class="ws-bootstrap-banner">
+          Onboarding not completed. <button onclick="wsResetBootstrap()">Reset Bootstrap</button>
+        </div>
+      </div>
+      <div class="ws-file-list" id="wsFileList">
+        <div class="panel-empty">Loading workspace files...</div>
+      </div>
+    </div>
+    <div id="wsEditorView" class="hidden">
+      <div class="ws-editor">
+        <div class="ws-editor-header">Editing: <strong id="wsEditorFilename"></strong></div>
+        <textarea id="wsEditorContent"></textarea>
+      </div>
+    </div>
+  </div>
+  <div class="panel-footer">
+    <span id="wsFileCount">0 files</span>
+    <span id="wsStatus"></span>
+  </div>
+</div>
+
+<!-- Scheduler panel -->
+<div class="panel" id="schedulerPanel">
+  <div class="panel-header">
+    <h3>Scheduler</h3>
+    <div class="panel-header-btns">
+      <button onclick="toggleCronForm()">+ New Job</button>
+      <button onclick="fetchCronJobs()">Refresh</button>
+      <button onclick="closeAllPanels()">Close</button>
+    </div>
+  </div>
+  <div class="panel-content" id="schedulerContent">
+    <div id="cronForm" class="hidden">
+      <div class="cron-form">
+        <h4>New Scheduled Job</h4>
+        <div class="cron-form-row">
+          <label>Name</label>
+          <input type="text" id="cronName" placeholder="e.g., Daily Summary" />
+        </div>
+        <div class="cron-form-row">
+          <label>Schedule Type</label>
+          <select id="cronType">
+            <option value="cron">Cron Expression</option>
+            <option value="interval">Interval</option>
+            <option value="once">One-time</option>
+          </select>
+        </div>
+        <div class="cron-form-row">
+          <label>Schedule Expression</label>
+          <input type="text" id="cronExpr" placeholder="0 9 * * * (cron) or 30m (interval) or 2025-01-01T09:00:00Z (once)" />
+        </div>
+        <div class="cron-form-row">
+          <label>Timezone (optional)</label>
+          <input type="text" id="cronTimezone" placeholder="America/Chicago" />
+        </div>
+        <div class="cron-form-row">
+          <label>Message (prompt sent to agent)</label>
+          <textarea id="cronMessage" placeholder="What should the agent do when this job runs?"></textarea>
+        </div>
+        <div class="cron-form-actions">
+          <button class="btn-primary" onclick="createCronJob()">Create Job</button>
+          <button class="btn-secondary" onclick="toggleCronForm()">Cancel</button>
+        </div>
+      </div>
+    </div>
+    <div id="cronJobList">
+      <div class="panel-empty">Loading scheduled jobs...</div>
+    </div>
+  </div>
+  <div class="panel-footer">
+    <span id="cronJobCount">0 jobs</span>
+    <span></span>
+  </div>
+</div>
+
+<!-- Skills panel -->
+<div class="panel" id="skillsPanel">
+  <div class="panel-header">
+    <h3>Skills</h3>
+    <div class="panel-header-btns">
+      <button onclick="fetchSkills()">Refresh</button>
+      <button onclick="closeAllPanels()">Close</button>
+    </div>
+  </div>
+  <div class="panel-content" id="skillsContent">
+    <div class="skill-tabs">
+      <span class="skill-tab active" data-tab="installed" onclick="switchSkillTab('installed')">Installed</span>
+      <span class="skill-tab" data-tab="browse" onclick="switchSkillTab('browse')">Browse</span>
+    </div>
+    <div id="skillsInstalledView">
+      <div id="skillsList">
+        <div class="panel-empty">Loading skills...</div>
+      </div>
+    </div>
+    <div id="skillsBrowseView" class="hidden">
+      <div class="skill-install-form">
+        <input type="text" id="skillSearchInput" placeholder="Search ClawHub or enter GitHub owner/repo..." />
+        <button onclick="searchSkills()">Search</button>
+      </div>
+      <div id="skillSearchResults"></div>
+    </div>
+  </div>
+  <div class="panel-footer">
+    <span id="skillCount">0 skills</span>
+    <span></span>
+  </div>
+</div>
+
+<!-- Toast container -->
+<div class="toast-container" id="toastContainer"></div>
+
+<!-- Health panel -->
+<div class="panel" id="healthPanel">
+  <div class="panel-header">
+    <h3>System Health</h3>
+    <div class="panel-header-btns">
+      <button onclick="fetchHealth()">Refresh</button>
+      <button onclick="closeAllPanels()">Close</button>
+    </div>
+  </div>
+  <div class="panel-content" id="healthContent">
+    <div class="panel-empty">Loading health data...</div>
+  </div>
+  <div class="panel-footer">
+    <span id="healthTimestamp">Last checked: never</span>
+    <div class="auto-refresh">
+      <input type="checkbox" id="healthAutoRefresh" checked />
+      <label for="healthAutoRefresh" style="cursor:pointer;">Auto-refresh (10s)</label>
+    </div>
+  </div>
+</div>
+
+<!-- Tasks panel -->
+<div class="panel" id="tasksPanel">
+  <div class="panel-header">
+    <h3>Tasks</h3>
+    <div class="panel-header-btns">
+      <button onclick="fetchTasks()">Refresh</button>
+      <button onclick="closeAllPanels()">Close</button>
+    </div>
+  </div>
+  <div class="panel-content" id="tasksContent">
+    <div class="task-add-bar">
+      <input type="text" id="taskInput" placeholder="Add a task... (Enter to save)" />
+      <select id="taskPrioritySelect" style="background:var(--bg3);border:1px solid var(--border2);border-radius:6px;padding:6px 8px;color:var(--text);font-size:12px;outline:none;cursor:pointer;">
+        <option value="medium">Medium</option>
+        <option value="high">High</option>
+        <option value="low">Low</option>
+      </select>
+      <button onclick="addTask()">Add</button>
+    </div>
+    <div class="task-filters" id="taskFilters">
+      <span class="task-filter active" data-filter="active" onclick="setTaskFilter(this)">Active</span>
+      <span class="task-filter" data-filter="all" onclick="setTaskFilter(this)">All</span>
+      <span class="task-filter" data-filter="done" onclick="setTaskFilter(this)">Done</span>
+      <span class="task-filter" data-filter="high" onclick="setTaskFilter(this, 'priority')">High Priority</span>
+    </div>
+    <div id="taskList">
+      <div class="task-empty">Loading tasks...</div>
+    </div>
+  </div>
+  <div class="panel-footer">
+    <span id="taskCount">0 tasks</span>
+    <span id="taskDoneCount" style="color:var(--success);"></span>
+  </div>
+</div>
+
+<!-- Notes panel -->
+<div class="panel" id="notesPanel">
+  <div class="panel-header">
+    <h3>Notes</h3>
+    <div class="panel-header-btns">
+      <button id="noteBackBtn" class="hidden" onclick="noteBackToList()">Back</button>
+      <button id="noteSaveBtn" class="hidden" onclick="saveCurrentNote()">Save</button>
+      <button onclick="closeAllPanels()">Close</button>
+    </div>
+  </div>
+  <div class="panel-content" id="notesContent">
+    <div class="notes-layout">
+      <div id="notesListView">
+        <div class="notes-toolbar">
+          <input type="text" id="noteSearchInput" placeholder="Search notes..." />
+          <button onclick="createNewNote()">+ New</button>
+        </div>
+        <div id="notesList">
+          <div class="note-empty">Loading notes...</div>
+        </div>
+      </div>
+      <div id="noteEditorView" class="hidden">
+        <div class="note-editor-header">
+          <input type="text" id="noteNameInput" placeholder="Note name" />
+        </div>
+        <div class="note-editor-tabs">
+          <span class="note-editor-tab active" data-tab="edit" onclick="switchNoteTab('edit')">Edit</span>
+          <span class="note-editor-tab" data-tab="preview" onclick="switchNoteTab('preview')">Preview</span>
+        </div>
+        <div id="noteEditPane">
+          <textarea class="note-textarea" id="noteContentInput" placeholder="Write your note in Markdown..."></textarea>
+        </div>
+        <div id="notePreviewPane" class="hidden">
+          <div class="note-preview" id="notePreviewContent"></div>
+        </div>
+      </div>
+    </div>
+  </div>
+  <div class="panel-footer">
+    <span id="noteCount">0 notes</span>
+    <span id="noteStatus"></span>
   </div>
 </div>
 
@@ -561,6 +1112,7 @@ async function apiFetch(url, opts) {
 }
 
 // ===== Panels =====
+let healthInterval = null;
 function openPanel(name) {
   closeAllPanels();
   currentPanel = name;
@@ -569,12 +1121,19 @@ function openPanel(name) {
   backdrop.classList.add('open');
   if (name === 'logs') { fetchLogs(); startAutoRefresh(); }
   if (name === 'settings') { loadSettings(); checkVersion(); }
+  if (name === 'health') { fetchHealth(); startHealthAutoRefresh(); }
+  if (name === 'tasks') { fetchTasks(); }
+  if (name === 'notes') { fetchNotes(); }
+  if (name === 'workspace') { fetchWorkspace(); }
+  if (name === 'scheduler') { fetchCronJobs(); }
+  if (name === 'skills') { fetchSkills(); }
 }
 
 function closeAllPanels() {
   document.querySelectorAll('.panel').forEach(p => p.classList.remove('open'));
   backdrop.classList.remove('open');
   stopAutoRefresh();
+  stopHealthAutoRefresh();
   currentPanel = null;
 }
 
@@ -616,7 +1175,7 @@ function renderSessions(sessions) {
 function newChat() {
   sessionId = 'web-' + Date.now();
   isWelcome = true;
-  chat.innerHTML = '<div class="welcome"><h2>Welcome to PennyClaw</h2><p>Your $0/month personal AI agent. Type a message to get started.</p><div class="shortcuts"><kbd>Ctrl</kbd>+<kbd>K</kbd> New chat &nbsp;<kbd>Ctrl</kbd>+<kbd>L</kbd> Clear &nbsp;<kbd>Ctrl</kbd>+<kbd>E</kbd> Export &nbsp;<kbd>Esc</kbd> Close panels</div></div>';
+  chat.innerHTML = '<div class="welcome"><h2>Welcome to PennyClaw</h2><p>Your $0/month personal AI agent. Type a message to get started.</p><div class="shortcuts"><kbd>Ctrl</kbd>+<kbd>K</kbd> New chat &nbsp;<kbd>Ctrl</kbd>+<kbd>L</kbd> Clear &nbsp;<kbd>Ctrl</kbd>+<kbd>E</kbd> Export &nbsp;<kbd>Esc</kbd> Close panels<br><kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>H</kbd> Health &nbsp;<kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>T</kbd> Tasks &nbsp;<kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>N</kbd> Notes &nbsp;<kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>W</kbd> Workspace &nbsp;<kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>J</kbd> Scheduler<br><kbd>Ctrl</kbd>+<kbd>S</kbd> Save note/file</div></div>';
   $('chatTitle').textContent = 'New Chat';
   input.focus();
   loadSessions();
@@ -692,6 +1251,7 @@ async function loadSettings() {
   try {
     const res = await apiFetch('/api/settings');
     const s = await res.json();
+    currentSettings = s;
     $('setProvider').value = s.provider || 'openai';
     $('setModel').value = s.model || '';
     $('setApiKey').value = '';
@@ -700,6 +1260,7 @@ async function loadSettings() {
     $('setMaxTokens').value = s.max_tokens || 4096;
     $('setTemperature').value = s.temperature != null ? s.temperature : 0.7;
     $('setSystemPrompt').value = s.system_prompt || '';
+    loadChannelStatus();
   } catch (e) {}
 }
 
@@ -985,6 +1546,985 @@ document.addEventListener('keydown', e => {
   if ((e.ctrlKey || e.metaKey) && e.key === 'e') { e.preventDefault(); exportChat(); }
   // Escape: Close panels
   if (e.key === 'Escape') { closeAllPanels(); input.focus(); }
+});
+
+// ===== Toast Notifications =====
+function showToast(message, type) {
+  type = type || 'info';
+  const icons = { success: '\u2713', error: '\u2717', info: '\u2139' };
+  const container = $('toastContainer');
+  const toast = document.createElement('div');
+  toast.className = 'toast ' + type;
+  toast.innerHTML = '<span class="toast-icon">' + (icons[type] || '') + '</span>' + escapeHtml(message);
+  container.appendChild(toast);
+  setTimeout(() => { toast.style.opacity = '0'; toast.style.transition = 'opacity 0.3s'; setTimeout(() => toast.remove(), 300); }, 3000);
+}
+
+// ===== Health Dashboard =====
+function startHealthAutoRefresh() {
+  stopHealthAutoRefresh();
+  if ($('healthAutoRefresh').checked) healthInterval = setInterval(fetchHealth, 10000);
+}
+function stopHealthAutoRefresh() {
+  if (healthInterval) { clearInterval(healthInterval); healthInterval = null; }
+}
+$('healthAutoRefresh').addEventListener('change', () => {
+  if (currentPanel === 'health') {
+    if ($('healthAutoRefresh').checked) startHealthAutoRefresh();
+    else stopHealthAutoRefresh();
+  }
+});
+
+async function fetchHealth() {
+  try {
+    const res = await apiFetch('/api/health');
+    const h = await res.json();
+    renderHealth(h);
+    updateHeaderHealth(h.status);
+    $('healthTimestamp').textContent = 'Last checked: ' + new Date().toLocaleTimeString();
+  } catch (e) {
+    $('healthContent').innerHTML = '<div class="panel-empty">Failed to fetch health data.</div>';
+    updateHeaderHealth('unknown');
+  }
+}
+
+function updateHeaderHealth(status) {
+  const el = $('headerStatus');
+  if (status === 'healthy') {
+    el.textContent = 'Healthy';
+    el.style.color = 'var(--success)';
+    el.style.setProperty('--dot-color', 'var(--success)');
+  } else if (status === 'degraded') {
+    el.textContent = 'Degraded';
+    el.style.color = 'var(--warn)';
+  } else if (status === 'unhealthy') {
+    el.textContent = 'Unhealthy';
+    el.style.color = 'var(--error)';
+  } else {
+    el.textContent = 'Online';
+    el.style.color = 'var(--success)';
+  }
+}
+
+function renderHealth(h) {
+  const el = $('healthContent');
+  const statusClass = h.status || 'healthy';
+  const statusLabel = (h.status || 'healthy').charAt(0).toUpperCase() + (h.status || 'healthy').slice(1);
+  const sys = h.system || {};
+  const ag = h.agent || {};
+  const checks = h.checks || {};
+
+  const memPct = sys.memory_used_mb && sys.memory_total_mb ? Math.round(sys.memory_used_mb / sys.memory_total_mb * 100) : 0;
+  const diskPct = sys.disk_used_gb && sys.disk_total_gb ? Math.round(sys.disk_used_gb / sys.disk_total_gb * 100) : 0;
+  const memClass = memPct > 90 ? 'crit' : memPct > 75 ? 'warn' : 'ok';
+  const diskClass = diskPct > 90 ? 'crit' : diskPct > 75 ? 'warn' : 'ok';
+
+  let html = '<div class="health-status-banner ' + statusClass + '">';
+  html += statusLabel + ' &mdash; ' + (h.version || 'unknown') + ' (' + (ag.provider || '?') + '/' + (ag.model || '?') + ')';
+  html += '</div>';
+
+  html += '<div class="health-grid">';
+  html += '<div class="health-card"><div class="hc-label">Memory</div><div class="hc-value">' + (sys.memory_used_mb || 0).toFixed(0) + ' MB</div><div class="hc-sub">of ' + (sys.memory_total_mb || 0).toFixed(0) + ' MB</div><div class="gauge-bar"><div class="gauge-fill ' + memClass + '" style="width:' + memPct + '%"></div></div></div>';
+  html += '<div class="health-card"><div class="hc-label">Disk</div><div class="hc-value">' + (sys.disk_used_gb || 0).toFixed(1) + ' GB</div><div class="hc-sub">of ' + (sys.disk_total_gb || 0).toFixed(1) + ' GB</div><div class="gauge-bar"><div class="gauge-fill ' + diskClass + '" style="width:' + diskPct + '%"></div></div></div>';
+  html += '<div class="health-card"><div class="hc-label">Goroutines</div><div class="hc-value">' + (sys.goroutines || 0) + '</div><div class="hc-sub">active</div></div>';
+  html += '<div class="health-card"><div class="hc-label">Uptime</div><div class="hc-value">' + formatUptime(sys.uptime_seconds) + '</div><div class="hc-sub">since start</div></div>';
+  html += '</div>';
+
+  html += '<div class="health-section"><h4>Agent Metrics</h4>';
+  html += '<div class="health-row"><span class="hr-label">Total Requests</span><span class="hr-value">' + (ag.total_requests || 0) + '</span></div>';
+  html += '<div class="health-row"><span class="hr-label">Total Errors</span><span class="hr-value" style="color:' + ((ag.total_errors || 0) > 0 ? 'var(--error)' : 'inherit') + '">' + (ag.total_errors || 0) + '</span></div>';
+  html += '<div class="health-row"><span class="hr-label">Avg Latency</span><span class="hr-value">' + (ag.avg_latency_ms || 0).toFixed(0) + ' ms</span></div>';
+  html += '<div class="health-row"><span class="hr-label">P99 Latency</span><span class="hr-value">' + (ag.p99_latency_ms || 0).toFixed(0) + ' ms</span></div>';
+  html += '<div class="health-row"><span class="hr-label">Skills Loaded</span><span class="hr-value">' + (ag.skills_loaded || 0) + '</span></div>';
+  html += '</div>';
+
+  if (checks && Object.keys(checks).length) {
+    html += '<div class="health-section"><h4>Health Checks</h4>';
+    for (const [name, result] of Object.entries(checks)) {
+      const icon = result === 'ok' ? '\u2713' : result === 'warn' ? '\u26A0' : '\u2717';
+      const color = result === 'ok' ? 'var(--success)' : result === 'warn' ? 'var(--warn)' : 'var(--error)';
+      html += '<div class="health-row"><span class="hr-label">' + escapeHtml(name) + '</span><span class="hr-value" style="color:' + color + '">' + icon + ' ' + result + '</span></div>';
+    }
+    html += '</div>';
+  }
+
+  el.innerHTML = html;
+}
+
+function formatUptime(seconds) {
+  if (!seconds) return '0s';
+  const d = Math.floor(seconds / 86400);
+  const h = Math.floor((seconds % 86400) / 3600);
+  const m = Math.floor((seconds % 3600) / 60);
+  if (d > 0) return d + 'd ' + h + 'h';
+  if (h > 0) return h + 'h ' + m + 'm';
+  return m + 'm';
+}
+
+// Periodic header health check (every 30s)
+setInterval(async () => {
+  try {
+    const res = await apiFetch('/api/health');
+    const h = await res.json();
+    updateHeaderHealth(h.status);
+  } catch (e) {}
+}, 30000);
+
+// ===== Task Manager =====
+let currentTaskFilter = 'active';
+let currentTaskPriorityFilter = '';
+
+$('taskInput').addEventListener('keydown', e => {
+  if (e.key === 'Enter') { e.preventDefault(); addTask(); }
+});
+
+function setTaskFilter(el, type) {
+  document.querySelectorAll('.task-filter').forEach(f => f.classList.remove('active'));
+  el.classList.add('active');
+  if (type === 'priority') {
+    currentTaskFilter = '';
+    currentTaskPriorityFilter = el.dataset.filter;
+  } else {
+    currentTaskFilter = el.dataset.filter;
+    currentTaskPriorityFilter = '';
+  }
+  fetchTasks();
+}
+
+async function fetchTasks() {
+  try {
+    let url = '/api/tasks?';
+    if (currentTaskFilter === 'active') url += 'status=active';
+    else if (currentTaskFilter === 'done') url += 'status=done';
+    else if (currentTaskFilter === 'all') url += 'status=all';
+    if (currentTaskPriorityFilter) url += 'priority=' + currentTaskPriorityFilter + '&status=all';
+    const res = await apiFetch(url);
+    const data = await res.json();
+    renderTasks(data.tasks || []);
+  } catch (e) {
+    $('taskList').innerHTML = '<div class="task-empty">Failed to load tasks.</div>';
+  }
+}
+
+function renderTasks(tasks) {
+  const el = $('taskList');
+  if (!tasks.length) {
+    el.innerHTML = '<div class="task-empty">No tasks found. Add one above!</div>';
+    $('taskCount').textContent = '0 tasks';
+    $('taskDoneCount').textContent = '';
+    return;
+  }
+  const doneCount = tasks.filter(t => t.status === 'done').length;
+  $('taskCount').textContent = tasks.length + ' task' + (tasks.length !== 1 ? 's' : '');
+  $('taskDoneCount').textContent = doneCount > 0 ? doneCount + ' done' : '';
+  // Update sidebar badge
+  const activeCount = tasks.filter(t => t.status !== 'done').length;
+  const badge = $('taskBadge');
+  if (badge) badge.textContent = activeCount > 0 ? activeCount : '';
+
+  el.innerHTML = tasks.map(t => {
+    const isDone = t.status === 'done';
+    const checkClass = isDone ? 'task-check checked' : 'task-check';
+    const cardClass = isDone ? 'task-card done' : 'task-card';
+    let meta = '';
+    if (t.tags && t.tags.length) {
+      meta += t.tags.map(tag => '<span class="task-tag">' + escapeHtml(tag) + '</span>').join('');
+    }
+    if (t.due_date) {
+      meta += '<span class="task-due">Due: ' + escapeHtml(t.due_date) + '</span>';
+    }
+    return '<div class="' + cardClass + '" data-id="' + t.id + '">' +
+      '<div class="task-card-header">' +
+      '<div class="' + checkClass + '" onclick="toggleTask(' + t.id + ', ' + isDone + ')">' + (isDone ? '\u2713' : '') + '</div>' +
+      '<span class="task-title">' + escapeHtml(t.title) + '</span>' +
+      '<span class="task-priority ' + (t.priority || 'medium') + '">' + (t.priority || 'medium') + '</span>' +
+      '<div class="task-actions"><button onclick="deleteTask(' + t.id + ')" title="Delete">&times;</button></div>' +
+      '</div>' +
+      (meta ? '<div class="task-meta">' + meta + '</div>' : '') +
+      '</div>';
+  }).join('');
+}
+
+async function addTask() {
+  const title = $('taskInput').value.trim();
+  if (!title) return;
+  const priority = $('taskPrioritySelect').value;
+  try {
+    await apiFetch('/api/tasks', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ title, priority })
+    });
+    $('taskInput').value = '';
+    showToast('Task added', 'success');
+    fetchTasks();
+  } catch (e) {
+    showToast('Failed to add task', 'error');
+  }
+}
+
+async function toggleTask(id, isDone) {
+  try {
+    await apiFetch('/api/tasks/' + id, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ status: isDone ? 'todo' : 'done' })
+    });
+    fetchTasks();
+  } catch (e) {
+    showToast('Failed to update task', 'error');
+  }
+}
+
+async function deleteTask(id) {
+  if (!confirm('Delete this task?')) return;
+  try {
+    await apiFetch('/api/tasks/' + id, { method: 'DELETE' });
+    showToast('Task deleted', 'success');
+    fetchTasks();
+  } catch (e) {
+    showToast('Failed to delete task', 'error');
+  }
+}
+
+// ===== Notes Manager =====
+let currentNoteName = null;
+let noteEditorDirty = false;
+
+$('noteSearchInput').addEventListener('input', debounce(async function() {
+  const q = $('noteSearchInput').value.trim();
+  if (!q) { fetchNotes(); return; }
+  try {
+    const res = await apiFetch('/api/notes/search?q=' + encodeURIComponent(q));
+    const data = await res.json();
+    renderNotesList(data.notes || []);
+  } catch (e) {}
+}, 300));
+
+function debounce(fn, delay) {
+  let timer;
+  return function() {
+    clearTimeout(timer);
+    const args = arguments;
+    const ctx = this;
+    timer = setTimeout(() => fn.apply(ctx, args), delay);
+  };
+}
+
+async function fetchNotes() {
+  try {
+    const res = await apiFetch('/api/notes');
+    const data = await res.json();
+    renderNotesList(data.notes || []);
+  } catch (e) {
+    $('notesList').innerHTML = '<div class="note-empty">Failed to load notes.</div>';
+  }
+}
+
+function renderNotesList(notes) {
+  const el = $('notesList');
+  $('noteCount').textContent = notes.length + ' note' + (notes.length !== 1 ? 's' : '');
+  if (!notes.length) {
+    el.innerHTML = '<div class="note-empty">No notes yet. Create one!</div>';
+    return;
+  }
+  el.innerHTML = notes.map(n => {
+    const active = n.name === currentNoteName ? ' active' : '';
+    const updated = n.updated_at ? new Date(n.updated_at).toLocaleDateString() : '';
+    const size = n.size ? formatBytes(n.size) : '';
+    return '<div class="note-item' + active + '" onclick="openNote(\'' + escapeHtml(n.name).replace(/'/g, "\\'") + '\')">' +
+      '<div class="note-item-info"><span class="note-item-name">' + escapeHtml(n.name) + '</span>' +
+      '<span class="note-item-meta">' + updated + (size ? ' &middot; ' + size : '') + '</span></div>' +
+      '<div class="note-item-actions"><button onclick="event.stopPropagation();deleteNote(\'' + escapeHtml(n.name).replace(/'/g, "\\'") + '\')" title="Delete">&times;</button></div>' +
+      '</div>';
+  }).join('');
+}
+
+function createNewNote() {
+  currentNoteName = null;
+  $('noteNameInput').value = '';
+  $('noteContentInput').value = '';
+  $('notesListView').classList.add('hidden');
+  $('noteEditorView').classList.remove('hidden');
+  $('noteBackBtn').classList.remove('hidden');
+  $('noteSaveBtn').classList.remove('hidden');
+  $('noteNameInput').focus();
+  switchNoteTab('edit');
+  noteEditorDirty = false;
+}
+
+async function openNote(name) {
+  try {
+    const res = await apiFetch('/api/notes/' + encodeURIComponent(name));
+    const data = await res.json();
+    currentNoteName = name;
+    $('noteNameInput').value = name;
+    $('noteContentInput').value = data.content || '';
+    $('notesListView').classList.add('hidden');
+    $('noteEditorView').classList.remove('hidden');
+    $('noteBackBtn').classList.remove('hidden');
+    $('noteSaveBtn').classList.remove('hidden');
+    switchNoteTab('edit');
+    noteEditorDirty = false;
+  } catch (e) {
+    showToast('Failed to open note', 'error');
+  }
+}
+
+function noteBackToList() {
+  if (noteEditorDirty && !confirm('Discard unsaved changes?')) return;
+  $('notesListView').classList.remove('hidden');
+  $('noteEditorView').classList.add('hidden');
+  $('noteBackBtn').classList.add('hidden');
+  $('noteSaveBtn').classList.add('hidden');
+  currentNoteName = null;
+  noteEditorDirty = false;
+  fetchNotes();
+}
+
+async function saveCurrentNote() {
+  const name = $('noteNameInput').value.trim();
+  const content = $('noteContentInput').value;
+  if (!name) { showToast('Note name is required', 'error'); return; }
+  try {
+    if (currentNoteName && currentNoteName !== name) {
+      // Name changed: save as new, delete old
+      await apiFetch('/api/notes', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name, content })
+      });
+      await apiFetch('/api/notes/' + encodeURIComponent(currentNoteName), { method: 'DELETE' });
+    } else if (currentNoteName) {
+      await apiFetch('/api/notes/' + encodeURIComponent(name), {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ content })
+      });
+    } else {
+      await apiFetch('/api/notes', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name, content })
+      });
+    }
+    currentNoteName = name;
+    noteEditorDirty = false;
+    showToast('Note saved', 'success');
+    $('noteStatus').textContent = 'Saved';
+    setTimeout(() => $('noteStatus').textContent = '', 2000);
+  } catch (e) {
+    showToast('Failed to save note', 'error');
+  }
+}
+
+async function deleteNote(name) {
+  if (!confirm('Delete note "' + name + '"?')) return;
+  try {
+    await apiFetch('/api/notes/' + encodeURIComponent(name), { method: 'DELETE' });
+    showToast('Note deleted', 'success');
+    if (currentNoteName === name) noteBackToList();
+    else fetchNotes();
+  } catch (e) {
+    showToast('Failed to delete note', 'error');
+  }
+}
+
+function switchNoteTab(tab) {
+  document.querySelectorAll('.note-editor-tab').forEach(t => t.classList.toggle('active', t.dataset.tab === tab));
+  if (tab === 'edit') {
+    $('noteEditPane').classList.remove('hidden');
+    $('notePreviewPane').classList.add('hidden');
+  } else {
+    $('noteEditPane').classList.add('hidden');
+    $('notePreviewPane').classList.remove('hidden');
+    $('notePreviewContent').innerHTML = renderMarkdown($('noteContentInput').value || '*No content*');
+  }
+}
+
+// Track dirty state
+$('noteContentInput').addEventListener('input', () => { noteEditorDirty = true; });
+$('noteNameInput').addEventListener('input', () => { noteEditorDirty = true; });
+
+// ===== Channel Config Functions =====
+function loadChannelStatus() {
+  // Check Telegram
+  if (currentSettings && currentSettings.telegram_enabled) {
+    $('telegramStatus').textContent = 'Connected';
+    $('telegramStatus').className = 'channel-card-status connected';
+  }
+  // Check Email
+  if (currentSettings && currentSettings.email_enabled) {
+    $('emailStatus').textContent = 'Configured';
+    $('emailStatus').className = 'channel-card-status connected';
+    if (currentSettings.smtp_host) $('setSmtpHost').value = currentSettings.smtp_host;
+    if (currentSettings.smtp_port) $('setSmtpPort').value = currentSettings.smtp_port;
+    if (currentSettings.smtp_user) $('setSmtpUser').value = currentSettings.smtp_user;
+  }
+  // Check Webhook
+  if (currentSettings && currentSettings.webhook_enabled) {
+    $('webhookStatus').textContent = 'Enabled';
+    $('webhookStatus').className = 'channel-card-status connected';
+  }
+  // Check Discord
+  if (currentSettings && currentSettings.discord_enabled) {
+    $('discordStatus').textContent = 'Connected';
+    $('discordStatus').className = 'channel-card-status connected';
+  }
+  // Set webhook URL
+  const host = window.location.origin;
+  $('webhookUrl').value = host + '/api/webhooks';
+}
+
+async function saveTelegramToken() {
+  const token = $('setTelegramToken').value.trim();
+  if (!token) { showToast('Please enter a Telegram bot token', 'error'); return; }
+  try {
+    await apiFetch('/api/settings', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ telegram_token: token, telegram_enabled: true })
+    });
+    showToast('Telegram connected! Restart required to activate.', 'success');
+    $('telegramStatus').textContent = 'Connected';
+    $('telegramStatus').className = 'channel-card-status connected';
+    $('setTelegramToken').value = '';
+  } catch (e) {
+    showToast('Failed to save Telegram config', 'error');
+  }
+}
+
+async function saveEmailConfig() {
+  const host = $('setSmtpHost').value.trim();
+  const port = parseInt($('setSmtpPort').value) || 587;
+  const user = $('setSmtpUser').value.trim();
+  const pass = $('setSmtpPass').value.trim();
+  if (!host || !user) { showToast('SMTP host and username are required', 'error'); return; }
+  try {
+    await apiFetch('/api/settings', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email_enabled: true, smtp_host: host, smtp_port: port, smtp_user: user, smtp_pass: pass })
+    });
+    showToast('Email configured! Restart required to activate.', 'success');
+    $('emailStatus').textContent = 'Configured';
+    $('emailStatus').className = 'channel-card-status connected';
+  } catch (e) {
+    showToast('Failed to save email config', 'error');
+  }
+}
+
+async function testEmail() {
+  showToast('Sending test email...', 'info');
+  try {
+    await apiFetch('/api/settings', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ test_email: true })
+    });
+    showToast('Test email sent (check server logs for result)', 'success');
+  } catch (e) {
+    showToast('Test email failed', 'error');
+  }
+}
+
+async function saveWebhookConfig() {
+  const secret = $('setWebhookSecret').value.trim();
+  try {
+    await apiFetch('/api/settings', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ webhook_enabled: true, webhook_secret: secret || undefined })
+    });
+    showToast('Webhook enabled! Restart required to activate.', 'success');
+    $('webhookStatus').textContent = 'Enabled';
+    $('webhookStatus').className = 'channel-card-status connected';
+  } catch (e) {
+    showToast('Failed to save webhook config', 'error');
+  }
+}
+
+function copyWebhookUrl() {
+  const url = $('webhookUrl').value;
+  navigator.clipboard.writeText(url).then(() => {
+    showToast('Webhook URL copied!', 'success');
+  }).catch(() => {
+    $('webhookUrl').select();
+    document.execCommand('copy');
+    showToast('Webhook URL copied!', 'success');
+  });
+}
+
+async function testWebhook() {
+  showToast('Sending test webhook...', 'info');
+  try {
+    await fetch($('webhookUrl').value, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ event: 'test', message: 'Test webhook from PennyClaw UI', timestamp: new Date().toISOString() })
+    });
+    showToast('Test webhook sent!', 'success');
+  } catch (e) {
+    showToast('Test webhook failed', 'error');
+  }
+}
+
+async function saveDiscordToken() {
+  const token = $('setDiscordToken').value.trim();
+  if (!token) { showToast('Please enter a Discord bot token', 'error'); return; }
+  try {
+    await apiFetch('/api/settings', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ discord_token: token, discord_enabled: true })
+    });
+    showToast('Discord connected! Restart required to activate.', 'success');
+    $('discordStatus').textContent = 'Connected';
+    $('discordStatus').className = 'channel-card-status connected';
+    $('setDiscordToken').value = '';
+  } catch (e) {
+    showToast('Failed to save Discord config', 'error');
+  }
+}
+
+let currentSettings = null;
+
+// ===== Health Indicator in Header =====
+let healthPollInterval = null;
+
+function startHealthPoll() {
+  updateHeaderHealth();
+  healthPollInterval = setInterval(updateHeaderHealth, 30000); // every 30s
+}
+
+async function updateHeaderHealth() {
+  try {
+    const res = await apiFetch('/api/health');
+    const data = await res.json();
+    const el = $('headerStatus');
+    if (data.status === 'healthy') {
+      el.textContent = '\u25CF Online';
+      el.style.color = 'var(--success)';
+    } else if (data.status === 'degraded') {
+      el.textContent = '\u25CF Degraded';
+      el.style.color = 'var(--warn)';
+    } else {
+      el.textContent = '\u25CF Unhealthy';
+      el.style.color = 'var(--error)';
+    }
+  } catch (e) {
+    const el = $('headerStatus');
+    el.textContent = '\u25CF Offline';
+    el.style.color = 'var(--error)';
+  }
+}
+
+// Start health polling on page load
+startHealthPoll();
+
+// ===== Workspace Manager =====
+let currentWsFile = null;
+let wsEditorDirty = false;
+
+async function fetchWorkspace() {
+  try {
+    const res = await apiFetch('/api/workspace');
+    const data = await res.json();
+    renderWorkspaceFiles(data.files || []);
+    if (data.needs_bootstrap) {
+      $('wsBootstrapBanner').classList.remove('hidden');
+    } else {
+      $('wsBootstrapBanner').classList.add('hidden');
+    }
+  } catch (e) {
+    $('wsFileList').innerHTML = '<div class="panel-empty">Failed to load workspace files.</div>';
+  }
+}
+
+function renderWorkspaceFiles(files) {
+  const el = $('wsFileList');
+  $('wsFileCount').textContent = files.length + ' file' + (files.length !== 1 ? 's' : '');
+  if (!files.length) {
+    el.innerHTML = '<div class="panel-empty">No workspace files yet.</div>';
+    return;
+  }
+  el.innerHTML = files.map(f => {
+    const active = f === currentWsFile ? ' active' : '';
+    return '<div class="ws-file' + active + '" onclick="wsOpenFile(\'' + escapeHtml(f).replace(/'/g, "\\'") + '\')">' +
+      '<span class="ws-file-name">' + escapeHtml(f) + '</span>' +
+      '<div class="ws-file-actions"><button onclick="event.stopPropagation();wsDeleteFile(\'' + escapeHtml(f).replace(/'/g, "\\'") + '\')" title="Delete">&times;</button></div>' +
+      '</div>';
+  }).join('');
+}
+
+async function wsOpenFile(name) {
+  try {
+    const res = await apiFetch('/api/workspace/' + encodeURIComponent(name));
+    const data = await res.json();
+    currentWsFile = name;
+    $('wsEditorFilename').textContent = name;
+    $('wsEditorContent').value = data.content || '';
+    $('wsListView').classList.add('hidden');
+    $('wsEditorView').classList.remove('hidden');
+    $('wsBackBtn').classList.remove('hidden');
+    $('wsSaveBtn').classList.remove('hidden');
+    wsEditorDirty = false;
+  } catch (e) {
+    showToast('Failed to open file', 'error');
+  }
+}
+
+function wsBackToList() {
+  if (wsEditorDirty && !confirm('Discard unsaved changes?')) return;
+  $('wsListView').classList.remove('hidden');
+  $('wsEditorView').classList.add('hidden');
+  $('wsBackBtn').classList.add('hidden');
+  $('wsSaveBtn').classList.add('hidden');
+  currentWsFile = null;
+  wsEditorDirty = false;
+  fetchWorkspace();
+}
+
+async function wsSaveFile() {
+  if (!currentWsFile) return;
+  try {
+    await apiFetch('/api/workspace/' + encodeURIComponent(currentWsFile), {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ content: $('wsEditorContent').value })
+    });
+    wsEditorDirty = false;
+    showToast('File saved', 'success');
+    $('wsStatus').textContent = 'Saved';
+    setTimeout(() => $('wsStatus').textContent = '', 2000);
+  } catch (e) {
+    showToast('Failed to save file', 'error');
+  }
+}
+
+async function wsDeleteFile(name) {
+  if (!confirm('Delete workspace file "' + name + '"?')) return;
+  try {
+    await apiFetch('/api/workspace/' + encodeURIComponent(name), { method: 'DELETE' });
+    showToast('File deleted', 'success');
+    if (currentWsFile === name) wsBackToList();
+    else fetchWorkspace();
+  } catch (e) {
+    showToast('Failed to delete file', 'error');
+  }
+}
+
+async function wsResetBootstrap() {
+  if (!confirm('Reset onboarding? The agent will re-run bootstrap on the next conversation.')) return;
+  try {
+    await apiFetch('/api/workspace/bootstrap', { method: 'POST' });
+    showToast('Bootstrap reset', 'success');
+    $('wsBootstrapBanner').classList.add('hidden');
+  } catch (e) {
+    showToast('Failed to reset bootstrap', 'error');
+  }
+}
+
+$('wsEditorContent').addEventListener('input', () => { wsEditorDirty = true; });
+
+// ===== Scheduler (Cron) =====
+let cronJobs = [];
+
+function toggleCronForm() {
+  $('cronForm').classList.toggle('hidden');
+}
+
+async function fetchCronJobs() {
+  try {
+    const res = await apiFetch('/api/cron');
+    const data = await res.json();
+    cronJobs = data.jobs || [];
+    renderCronJobs(cronJobs);
+  } catch (e) {
+    $('cronJobList').innerHTML = '<div class="panel-empty">Failed to load scheduled jobs.</div>';
+  }
+}
+
+function renderCronJobs(jobs) {
+  const el = $('cronJobList');
+  $('cronJobCount').textContent = jobs.length + ' job' + (jobs.length !== 1 ? 's' : '');
+  if (!jobs.length) {
+    el.innerHTML = '<div class="panel-empty">No scheduled jobs yet. Create one!</div>';
+    return;
+  }
+  el.innerHTML = jobs.map(j => {
+    const badgeClass = j.enabled ? 'enabled' : 'disabled';
+    const badgeText = j.enabled ? 'Enabled' : 'Disabled';
+    const nextRun = j.next_run_at ? new Date(j.next_run_at).toLocaleString() : 'N/A';
+    const lastRun = j.last_run_at ? new Date(j.last_run_at).toLocaleString() : 'Never';
+    return '<div class="cron-job-card">' +
+      '<div class="cron-job-header">' +
+      '<span class="cron-job-name">' + escapeHtml(j.name) + '</span>' +
+      '<span class="cron-job-badge ' + badgeClass + '">' + badgeText + '</span>' +
+      '</div>' +
+      '<div class="cron-job-schedule">' + escapeHtml(j.schedule_type) + ': ' + escapeHtml(j.schedule_expr) + (j.timezone ? ' (' + escapeHtml(j.timezone) + ')' : '') + '</div>' +
+      '<div class="cron-job-message">' + escapeHtml(j.message || '') + '</div>' +
+      '<div class="cron-job-meta">' +
+      '<span>Next: ' + nextRun + '</span>' +
+      '<span>Last: ' + lastRun + '</span>' +
+      '</div>' +
+      '<div class="cron-job-actions" style="margin-top:8px;">' +
+      '<button onclick="runCronJob(' + j.id + ')" title="Run now">&#x25B6; Run</button>' +
+      '<button onclick="toggleCronJob(' + j.id + ', ' + j.enabled + ')">' + (j.enabled ? 'Disable' : 'Enable') + '</button>' +
+      '<button onclick="viewCronRuns(' + j.id + ')" title="View run history">History</button>' +
+      '<button class="danger" onclick="deleteCronJob(' + j.id + ')" title="Delete">&times; Delete</button>' +
+      '</div>' +
+      '<div id="cronRuns' + j.id + '" class="cron-runs hidden"></div>' +
+      '</div>';
+  }).join('');
+}
+
+async function createCronJob() {
+  const name = $('cronName').value.trim();
+  const scheduleType = $('cronType').value;
+  const scheduleExpr = $('cronExpr').value.trim();
+  const timezone = $('cronTimezone').value.trim();
+  const message = $('cronMessage').value.trim();
+  if (!name || !scheduleExpr || !message) {
+    showToast('Name, schedule, and message are required', 'error');
+    return;
+  }
+  try {
+    await apiFetch('/api/cron', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        name,
+        schedule_type: scheduleType,
+        schedule_expr: scheduleExpr,
+        timezone: timezone || undefined,
+        message,
+        delete_after_run: scheduleType === 'once'
+      })
+    });
+    showToast('Job created', 'success');
+    $('cronName').value = '';
+    $('cronExpr').value = '';
+    $('cronTimezone').value = '';
+    $('cronMessage').value = '';
+    toggleCronForm();
+    fetchCronJobs();
+  } catch (e) {
+    showToast('Failed to create job', 'error');
+  }
+}
+
+async function runCronJob(id) {
+  try {
+    await apiFetch('/api/cron/' + id + '/run', { method: 'POST' });
+    showToast('Job triggered', 'success');
+    setTimeout(fetchCronJobs, 2000);
+  } catch (e) {
+    showToast('Failed to trigger job', 'error');
+  }
+}
+
+async function toggleCronJob(id, currentlyEnabled) {
+  try {
+    await apiFetch('/api/cron/' + id, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ enabled: !currentlyEnabled })
+    });
+    fetchCronJobs();
+  } catch (e) {
+    showToast('Failed to update job', 'error');
+  }
+}
+
+async function deleteCronJob(id) {
+  if (!confirm('Delete this scheduled job?')) return;
+  try {
+    await apiFetch('/api/cron/' + id, { method: 'DELETE' });
+    showToast('Job deleted', 'success');
+    fetchCronJobs();
+  } catch (e) {
+    showToast('Failed to delete job', 'error');
+  }
+}
+
+async function viewCronRuns(jobId) {
+  const el = $('cronRuns' + jobId);
+  if (!el.classList.contains('hidden')) {
+    el.classList.add('hidden');
+    return;
+  }
+  try {
+    const res = await apiFetch('/api/cron/' + jobId + '/runs');
+    const data = await res.json();
+    const runs = data.runs || [];
+    if (!runs.length) {
+      el.innerHTML = '<div style="font-size:11px;color:var(--text4);padding:6px 0;">No runs yet.</div>';
+    } else {
+      el.innerHTML = runs.map(r => {
+        const started = new Date(r.started_at).toLocaleString();
+        return '<div class="cron-run">' +
+          '<span class="cron-run-status ' + (r.status || '') + '">' + (r.status || '?') + '</span>' +
+          '<span class="cron-run-time">' + started + '</span>' +
+          '<span class="cron-run-result">' + escapeHtml((r.result || '').substring(0, 100)) + '</span>' +
+          '</div>';
+      }).join('');
+    }
+    el.classList.remove('hidden');
+  } catch (e) {
+    showToast('Failed to load run history', 'error');
+  }
+}
+
+// ===== Skills Manager =====
+let installedSkills = [];
+
+function switchSkillTab(tab) {
+  document.querySelectorAll('.skill-tab').forEach(t => t.classList.toggle('active', t.dataset.tab === tab));
+  if (tab === 'installed') {
+    $('skillsInstalledView').classList.remove('hidden');
+    $('skillsBrowseView').classList.add('hidden');
+  } else {
+    $('skillsInstalledView').classList.add('hidden');
+    $('skillsBrowseView').classList.remove('hidden');
+  }
+}
+
+async function fetchSkills() {
+  try {
+    const res = await apiFetch('/api/skills');
+    const data = await res.json();
+    installedSkills = data.skills || [];
+    renderSkills(installedSkills);
+  } catch (e) {
+    $('skillsList').innerHTML = '<div class="panel-empty">Failed to load skills.</div>';
+  }
+}
+
+function renderSkills(skills) {
+  const el = $('skillsList');
+  $('skillCount').textContent = skills.length + ' skill' + (skills.length !== 1 ? 's' : '');
+  if (!skills.length) {
+    el.innerHTML = '<div class="panel-empty">No skills installed.</div>';
+    return;
+  }
+  el.innerHTML = skills.map(s => {
+    const badgeClass = s.bundled ? 'bundled' : 'installed';
+    const badgeText = s.bundled ? 'Bundled' : 'Installed';
+    return '<div class="skill-card">' +
+      '<div class="skill-card-header">' +
+      '<span class="skill-name">' + escapeHtml(s.name) + '</span>' +
+      '<span class="skill-version">' + escapeHtml(s.version || '') + '</span>' +
+      '<span class="skill-badge ' + badgeClass + '">' + badgeText + '</span>' +
+      '<div class="skill-actions">' +
+      '<label class="skill-toggle"><input type="checkbox" ' + (s.enabled ? 'checked' : '') + ' onchange="toggleSkill(\'' + escapeHtml(s.name).replace(/'/g, "\\'") + '\', this.checked)" /><span class="slider"></span></label>' +
+      (!s.bundled ? '<button style="background:none;border:none;color:var(--text4);cursor:pointer;font-size:14px;" onclick="uninstallSkill(\'' + escapeHtml(s.name).replace(/'/g, "\\'") + '\')" title="Uninstall">&times;</button>' : '') +
+      '</div>' +
+      '</div>' +
+      '<div class="skill-desc">' + escapeHtml(s.description || '') + '</div>' +
+      (s.author ? '<div class="skill-author">by ' + escapeHtml(s.author) + '</div>' : '') +
+      '</div>';
+  }).join('');
+}
+
+async function toggleSkill(name, enabled) {
+  try {
+    await apiFetch('/api/skills/' + encodeURIComponent(name), {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ enabled })
+    });
+    showToast('Skill ' + (enabled ? 'enabled' : 'disabled'), 'success');
+  } catch (e) {
+    showToast('Failed to update skill', 'error');
+    fetchSkills();
+  }
+}
+
+async function uninstallSkill(name) {
+  if (!confirm('Uninstall skill "' + name + '"?')) return;
+  try {
+    await apiFetch('/api/skills/' + encodeURIComponent(name), { method: 'DELETE' });
+    showToast('Skill uninstalled', 'success');
+    fetchSkills();
+  } catch (e) {
+    showToast('Failed to uninstall skill', 'error');
+  }
+}
+
+$('skillSearchInput').addEventListener('keydown', e => {
+  if (e.key === 'Enter') { e.preventDefault(); searchSkills(); }
+});
+
+async function searchSkills() {
+  const q = $('skillSearchInput').value.trim();
+  if (!q) return;
+  $('skillSearchResults').innerHTML = '<div class="panel-empty">Searching...</div>';
+  try {
+    // Try ClawHub search first
+    const res = await apiFetch('/api/skills/search?q=' + encodeURIComponent(q));
+    const data = await res.json();
+    const results = data.skills || [];
+    if (!results.length) {
+      // If query looks like owner/repo, offer direct install
+      if (q.includes('/')) {
+        $('skillSearchResults').innerHTML = '<div class="panel-empty">No results on ClawHub.<br><button class="btn-primary" style="margin-top:8px;" onclick="installSkill(\'github\', \'' + escapeHtml(q) + '\')">Install from GitHub: ' + escapeHtml(q) + '</button></div>';
+      } else {
+        $('skillSearchResults').innerHTML = '<div class="panel-empty">No skills found for "' + escapeHtml(q) + '".</div>';
+      }
+      return;
+    }
+    $('skillSearchResults').innerHTML = results.map(s => {
+      return '<div class="skill-card">' +
+        '<div class="skill-card-header">' +
+        '<span class="skill-name">' + escapeHtml(s.name || s.Name || '') + '</span>' +
+        '<span class="skill-version">' + escapeHtml(s.version || s.Version || '') + '</span>' +
+        '<button class="btn-primary" style="padding:3px 10px;font-size:11px;" onclick="installSkill(\'clawhub\', \'' + escapeHtml(s.name || s.Name || '') + '\')">Install</button>' +
+        '</div>' +
+        '<div class="skill-desc">' + escapeHtml(s.description || s.Description || '') + '</div>' +
+        '</div>';
+    }).join('');
+  } catch (e) {
+    $('skillSearchResults').innerHTML = '<div class="panel-empty">Search failed. Try again.</div>';
+  }
+}
+
+async function installSkill(source, identifier) {
+  try {
+    const res = await apiFetch('/api/skills/install', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ source, identifier })
+    });
+    const data = await res.json();
+    showToast('Installed: ' + (data.skill ? data.skill.name : identifier), 'success');
+    fetchSkills();
+    switchSkillTab('installed');
+  } catch (e) {
+    showToast('Installation failed', 'error');
+  }
+}
+
+// ===== Keyboard shortcuts (extended) =====
+document.addEventListener('keydown', e => {
+  // Ctrl+Shift+H: Health panel
+  if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key === 'H') { e.preventDefault(); openPanel('health'); }
+  // Ctrl+Shift+T: Tasks panel
+  if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key === 'T') { e.preventDefault(); openPanel('tasks'); }
+  // Ctrl+Shift+N: Notes panel
+  if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key === 'N') { e.preventDefault(); openPanel('notes'); }
+  // Ctrl+Shift+W: Workspace panel
+  if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key === 'W') { e.preventDefault(); openPanel('workspace'); }
+  // Ctrl+Shift+J: Scheduler panel
+  if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key === 'J') { e.preventDefault(); openPanel('scheduler'); }
+  // Ctrl+S: Save note (when in note editor) or workspace file (when in ws editor)
+  if ((e.ctrlKey || e.metaKey) && e.key === 's' && !e.shiftKey) {
+    if (currentPanel === 'notes' && !$('noteEditorView').classList.contains('hidden')) {
+      e.preventDefault(); saveCurrentNote();
+    } else if (currentPanel === 'workspace' && !$('wsEditorView').classList.contains('hidden')) {
+      e.preventDefault(); wsSaveFile();
+    }
+  }
 });
 
 // ===== Utility =====

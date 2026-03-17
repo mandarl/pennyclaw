@@ -89,8 +89,238 @@ func (ts *TaskStore) nextID(tasks []Task) int {
 	return maxID + 1
 }
 
+// --- Exported TaskStore methods for REST API ---
+
+// ListTasks returns all tasks, optionally filtered.
+func (ts *TaskStore) ListTasks(status, priority, tag string) ([]Task, error) {
+	tasks, err := ts.loadTasks()
+	if err != nil {
+		return nil, err
+	}
+	var filtered []Task
+	for _, t := range tasks {
+		if status == "active" || status == "" {
+			// "active" and empty both mean: exclude done
+			if t.Status == "done" {
+				continue
+			}
+		} else if status != "all" && t.Status != status {
+			continue
+		}
+		if priority != "" && t.Priority != priority {
+			continue
+		}
+		if tag != "" {
+			hasTag := false
+			for _, tt := range t.Tags {
+				if strings.EqualFold(tt, tag) {
+					hasTag = true
+					break
+				}
+			}
+			if !hasTag {
+				continue
+			}
+		}
+		filtered = append(filtered, t)
+	}
+	sort.Slice(filtered, func(i, j int) bool {
+		pi := priorityWeight(filtered[i].Priority)
+		pj := priorityWeight(filtered[j].Priority)
+		if pi != pj {
+			return pi > pj
+		}
+		return filtered[i].CreatedAt.Before(filtered[j].CreatedAt)
+	})
+	return filtered, nil
+}
+
+// AddTask creates a new task and returns it.
+func (ts *TaskStore) AddTask(title, priority, dueDate, notes string, tags []string) (Task, error) {
+	tasks, err := ts.loadTasks()
+	if err != nil {
+		return Task{}, err
+	}
+	if priority == "" {
+		priority = "medium"
+	}
+	task := Task{
+		ID:        ts.nextID(tasks),
+		Title:     title,
+		Status:    "todo",
+		Priority:  priority,
+		DueDate:   dueDate,
+		Tags:      tags,
+		Notes:     notes,
+		CreatedAt: time.Now(),
+		UpdatedAt: time.Now(),
+	}
+	tasks = append(tasks, task)
+	if err := ts.saveTasks(tasks); err != nil {
+		return Task{}, err
+	}
+	return task, nil
+}
+
+// UpdateTask updates an existing task by ID.
+func (ts *TaskStore) UpdateTask(id int, status, priority, title, dueDate, notes string) error {
+	tasks, err := ts.loadTasks()
+	if err != nil {
+		return err
+	}
+	for i := range tasks {
+		if tasks[i].ID == id {
+			if status != "" {
+				tasks[i].Status = status
+			}
+			if priority != "" {
+				tasks[i].Priority = priority
+			}
+			if title != "" {
+				tasks[i].Title = title
+			}
+			if dueDate != "" {
+				tasks[i].DueDate = dueDate
+			}
+			if notes != "" {
+				tasks[i].Notes = notes
+			}
+			tasks[i].UpdatedAt = time.Now()
+			return ts.saveTasks(tasks)
+		}
+	}
+	return fmt.Errorf("task #%d not found", id)
+}
+
+// DeleteTask removes a task by ID.
+func (ts *TaskStore) DeleteTask(id int) error {
+	tasks, err := ts.loadTasks()
+	if err != nil {
+		return err
+	}
+	var filtered []Task
+	found := false
+	for _, t := range tasks {
+		if t.ID == id {
+			found = true
+			continue
+		}
+		filtered = append(filtered, t)
+	}
+	if !found {
+		return fmt.Errorf("task #%d not found", id)
+	}
+	return ts.saveTasks(filtered)
+}
+
+// --- Exported NoteStore methods for REST API ---
+
+// ListNotes returns all notes with metadata.
+func (ns *NoteStore) ListNotes() ([]Note, error) {
+	entries, err := os.ReadDir(ns.notesDir)
+	if err != nil {
+		return []Note{}, nil
+	}
+	notes := make([]Note, 0)
+	for _, e := range entries {
+		if e.IsDir() || !strings.HasSuffix(e.Name(), ".md") {
+			continue
+		}
+		info, err := e.Info()
+		if err != nil {
+			continue
+		}
+		notes = append(notes, Note{
+			Name:      strings.TrimSuffix(e.Name(), ".md"),
+			Size:      info.Size(),
+			UpdatedAt: info.ModTime(),
+		})
+	}
+	return notes, nil
+}
+
+// ReadNote returns the content of a note.
+func (ns *NoteStore) ReadNote(name string) (string, error) {
+	name = sanitizeNoteName(name)
+	if name == "" {
+		return "", fmt.Errorf("invalid note name")
+	}
+	path := filepath.Join(ns.notesDir, name+".md")
+	data, err := os.ReadFile(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return "", fmt.Errorf("note %q not found", name)
+		}
+		return "", err
+	}
+	return string(data), nil
+}
+
+// SaveNote creates or updates a note.
+func (ns *NoteStore) SaveNote(name, content string) error {
+	name = sanitizeNoteName(name)
+	if name == "" {
+		return fmt.Errorf("invalid note name")
+	}
+	path := filepath.Join(ns.notesDir, name+".md")
+	return os.WriteFile(path, []byte(content), 0644)
+}
+
+// DeleteNote removes a note.
+func (ns *NoteStore) DeleteNote(name string) error {
+	name = sanitizeNoteName(name)
+	if name == "" {
+		return fmt.Errorf("invalid note name")
+	}
+	path := filepath.Join(ns.notesDir, name+".md")
+	if err := os.Remove(path); err != nil {
+		if os.IsNotExist(err) {
+			return fmt.Errorf("note %q not found", name)
+		}
+		return err
+	}
+	return nil
+}
+
+// SearchNotes searches notes by keyword and returns matches with snippets.
+func (ns *NoteStore) SearchNotes(query string) ([]Note, error) {
+	entries, err := os.ReadDir(ns.notesDir)
+	if err != nil {
+		return nil, nil
+	}
+	q := strings.ToLower(query)
+	var results []Note
+	for _, e := range entries {
+		if e.IsDir() || !strings.HasSuffix(e.Name(), ".md") {
+			continue
+		}
+		data, err := os.ReadFile(filepath.Join(ns.notesDir, e.Name()))
+		if err != nil {
+			continue
+		}
+		content := string(data)
+		if strings.Contains(strings.ToLower(content), q) {
+			info, _ := e.Info()
+			var size int64
+			var modTime time.Time
+			if info != nil {
+				size = info.Size()
+				modTime = info.ModTime()
+			}
+			results = append(results, Note{
+				Name:      strings.TrimSuffix(e.Name(), ".md"),
+				Content:   extractSnippet(content, query, 100),
+				Size:      size,
+				UpdatedAt: modTime,
+			})
+		}
+	}
+	return results, nil
+}
+
 // RegisterProductivitySkills adds task management and note-taking skills to the registry.
-func RegisterProductivitySkills(r *Registry, dataDir string) {
+// It returns the TaskStore and NoteStore so they can be shared with the web server.
+func RegisterProductivitySkills(r *Registry, dataDir string) (*TaskStore, *NoteStore) {
 	taskStore := NewTaskStore(dataDir)
 	noteStore := NewNoteStore(dataDir)
 
@@ -602,7 +832,9 @@ func RegisterProductivitySkills(r *Registry, dataDir string) {
 
 			return fmt.Sprintf("Found %d matching notes:\n%s", len(results), strings.Join(results, "\n")), nil
 		},
-	})
+		})
+
+	return taskStore, noteStore
 }
 
 // Helper functions

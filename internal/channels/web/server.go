@@ -25,6 +25,7 @@ import (
 	"github.com/mandarl/pennyclaw/internal/health"
 	"github.com/mandarl/pennyclaw/internal/memory"
 	"github.com/mandarl/pennyclaw/internal/skillpack"
+	"github.com/mandarl/pennyclaw/internal/skills"
 	"github.com/mandarl/pennyclaw/internal/workspace"
 )
 
@@ -130,6 +131,8 @@ type Server struct {
 	skillpack  *skillpack.Loader
 	webhook    *webhook.Handler
 	health     *health.Checker
+	taskStore  *skills.TaskStore
+	noteStore  *skills.NoteStore
 }
 
 // rateLimiter implements a simple per-IP token bucket rate limiter.
@@ -178,7 +181,7 @@ func (s *Server) logf(level, format string, args ...interface{}) {
 }
 
 // NewServer creates a new web UI server.
-func NewServer(host string, port int, handler MessageHandler, cfg *config.Config, cfgPath string, mem *memory.Store, version string, ws *workspace.Workspace, sched *cron.Scheduler, sp *skillpack.Loader, wh *webhook.Handler, hc *health.Checker) *Server {
+func NewServer(host string, port int, handler MessageHandler, cfg *config.Config, cfgPath string, mem *memory.Store, version string, ws *workspace.Workspace, sched *cron.Scheduler, sp *skillpack.Loader, wh *webhook.Handler, hc *health.Checker, ts *skills.TaskStore, ns *skills.NoteStore) *Server {
 	s := &Server{
 		host:      host,
 		port:      port,
@@ -195,6 +198,8 @@ func NewServer(host string, port int, handler MessageHandler, cfg *config.Config
 		skillpack: sp,
 		webhook:   wh,
 		health:    hc,
+		taskStore: ts,
+		noteStore: ns,
 	}
 
 	// Set up upload directory
@@ -249,6 +254,15 @@ func (s *Server) Start() error {
 		mux.HandleFunc("/api/webhooks", s.handleWebhook)
 		mux.HandleFunc("/api/webhooks/", s.handleWebhook)
 	}
+
+	// Task endpoints
+	mux.HandleFunc("/api/tasks", s.handleTasks)
+	mux.HandleFunc("/api/tasks/", s.handleTaskByID)
+
+	// Note endpoints
+	mux.HandleFunc("/api/notes", s.handleNotes)
+	mux.HandleFunc("/api/notes/search", s.handleNotesSearch)
+	mux.HandleFunc("/api/notes/", s.handleNoteByName)
 
 	// Skillpack endpoints
 	mux.HandleFunc("/api/skills", s.handleSkillsList)
@@ -351,6 +365,15 @@ type settingsResponse struct {
 	MaxTokens    int     `json:"max_tokens"`
 	Temperature  float64 `json:"temperature"`
 	SystemPrompt string  `json:"system_prompt"`
+
+	// Channel status fields
+	TelegramEnabled bool   `json:"telegram_enabled"`
+	DiscordEnabled  bool   `json:"discord_enabled"`
+	WebhookEnabled  bool   `json:"webhook_enabled"`
+	EmailEnabled    bool   `json:"email_enabled"`
+	SMTPHost        string `json:"smtp_host,omitempty"`
+	SMTPPort        int    `json:"smtp_port,omitempty"`
+	SMTPUser        string `json:"smtp_user,omitempty"`
 }
 
 func maskKey(key string) string {
@@ -369,13 +392,20 @@ func (s *Server) handleSettings(w http.ResponseWriter, r *http.Request) {
 	case http.MethodGet:
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(settingsResponse{
-			Provider:     s.cfg.LLM.Provider,
-			Model:        s.cfg.LLM.Model,
-			APIKey:       maskKey(s.cfg.LLM.APIKey),
-			BaseURL:      s.cfg.LLM.BaseURL,
-			MaxTokens:    s.cfg.LLM.MaxTokens,
-			Temperature:  s.cfg.LLM.Temperature,
-			SystemPrompt: s.cfg.SystemPrompt,
+			Provider:        s.cfg.LLM.Provider,
+			Model:           s.cfg.LLM.Model,
+			APIKey:          maskKey(s.cfg.LLM.APIKey),
+			BaseURL:         s.cfg.LLM.BaseURL,
+			MaxTokens:       s.cfg.LLM.MaxTokens,
+			Temperature:     s.cfg.LLM.Temperature,
+			SystemPrompt:    s.cfg.SystemPrompt,
+			TelegramEnabled: s.cfg.Channels.Telegram.Enabled,
+			DiscordEnabled:  s.cfg.Channels.Discord.Enabled,
+			WebhookEnabled:  s.cfg.Channels.Webhook.Enabled,
+			EmailEnabled:    s.cfg.Email.Enabled,
+			SMTPHost:        s.cfg.Email.SMTPHost,
+			SMTPPort:        s.cfg.Email.SMTPPort,
+			SMTPUser:        s.cfg.Email.Username,
 		})
 
 	case http.MethodPut:
@@ -387,6 +417,19 @@ func (s *Server) handleSettings(w http.ResponseWriter, r *http.Request) {
 			MaxTokens    *int     `json:"max_tokens"`
 			Temperature  *float64 `json:"temperature"`
 			SystemPrompt *string  `json:"system_prompt"`
+
+			// Channel config fields
+			TelegramEnabled *bool   `json:"telegram_enabled"`
+			TelegramToken   *string `json:"telegram_token"`
+			DiscordEnabled  *bool   `json:"discord_enabled"`
+			DiscordToken    *string `json:"discord_token"`
+			WebhookEnabled  *bool   `json:"webhook_enabled"`
+			WebhookSecret   *string `json:"webhook_secret"`
+			EmailEnabled    *bool   `json:"email_enabled"`
+			SMTPHost        *string `json:"smtp_host"`
+			SMTPPort        *int    `json:"smtp_port"`
+			SMTPUser        *string `json:"smtp_user"`
+			SMTPPass        *string `json:"smtp_pass"`
 		}
 		if err := json.NewDecoder(r.Body).Decode(&update); err != nil {
 			http.Error(w, "Invalid JSON", http.StatusBadRequest)
@@ -415,6 +458,41 @@ func (s *Server) handleSettings(w http.ResponseWriter, r *http.Request) {
 		}
 		if update.SystemPrompt != nil {
 			s.cfg.SystemPrompt = *update.SystemPrompt
+		}
+
+		// Channel config updates
+		if update.TelegramEnabled != nil {
+			s.cfg.Channels.Telegram.Enabled = *update.TelegramEnabled
+		}
+		if update.TelegramToken != nil && *update.TelegramToken != "" {
+			s.cfg.Channels.Telegram.Token = *update.TelegramToken
+		}
+		if update.DiscordEnabled != nil {
+			s.cfg.Channels.Discord.Enabled = *update.DiscordEnabled
+		}
+		if update.DiscordToken != nil && *update.DiscordToken != "" {
+			s.cfg.Channels.Discord.Token = *update.DiscordToken
+		}
+		if update.WebhookEnabled != nil {
+			s.cfg.Channels.Webhook.Enabled = *update.WebhookEnabled
+		}
+		if update.WebhookSecret != nil {
+			s.cfg.Channels.Webhook.Secret = *update.WebhookSecret
+		}
+		if update.EmailEnabled != nil {
+			s.cfg.Email.Enabled = *update.EmailEnabled
+		}
+		if update.SMTPHost != nil {
+			s.cfg.Email.SMTPHost = *update.SMTPHost
+		}
+		if update.SMTPPort != nil && *update.SMTPPort > 0 {
+			s.cfg.Email.SMTPPort = *update.SMTPPort
+		}
+		if update.SMTPUser != nil {
+			s.cfg.Email.Username = *update.SMTPUser
+		}
+		if update.SMTPPass != nil && *update.SMTPPass != "" {
+			s.cfg.Email.Password = *update.SMTPPass
 		}
 
 		if err := s.saveConfig(); err != nil {
@@ -1265,6 +1343,249 @@ func (s *Server) handleWebhook(w http.ResponseWriter, r *http.Request) {
 	}
 	s.logf("INFO", "Webhook received from %s", r.RemoteAddr)
 	s.webhook.ServeHTTP(w, r)
+}
+
+// --- Task handlers ---
+
+func (s *Server) handleTasks(w http.ResponseWriter, r *http.Request) {
+	if !s.requireAuth(w, r) {
+		return
+	}
+	if s.taskStore == nil {
+		http.Error(w, "Task store not available", http.StatusServiceUnavailable)
+		return
+	}
+
+	switch r.Method {
+	case http.MethodGet:
+		status := r.URL.Query().Get("status")
+		priority := r.URL.Query().Get("priority")
+		tag := r.URL.Query().Get("tag")
+		tasks, err := s.taskStore.ListTasks(status, priority, tag)
+		if err != nil {
+			http.Error(w, "Failed to list tasks", http.StatusInternalServerError)
+			return
+		}
+		if tasks == nil {
+			tasks = []skills.Task{}
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]interface{}{"tasks": tasks})
+
+	case http.MethodPost:
+		var body struct {
+			Title    string   `json:"title"`
+			Priority string   `json:"priority"`
+			DueDate  string   `json:"due_date"`
+			Tags     []string `json:"tags"`
+			Notes    string   `json:"notes"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			http.Error(w, "Invalid JSON", http.StatusBadRequest)
+			return
+		}
+		if body.Title == "" {
+			http.Error(w, "Title is required", http.StatusBadRequest)
+			return
+		}
+		task, err := s.taskStore.AddTask(body.Title, body.Priority, body.DueDate, body.Notes, body.Tags)
+		if err != nil {
+			http.Error(w, fmt.Sprintf("Failed to create task: %v", err), http.StatusInternalServerError)
+			return
+		}
+		s.logf("INFO", "Task #%d created via web UI: %s", task.ID, task.Title)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusCreated)
+		json.NewEncoder(w).Encode(task)
+
+	default:
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+	}
+}
+
+func (s *Server) handleTaskByID(w http.ResponseWriter, r *http.Request) {
+	if !s.requireAuth(w, r) {
+		return
+	}
+	if s.taskStore == nil {
+		http.Error(w, "Task store not available", http.StatusServiceUnavailable)
+		return
+	}
+
+	idStr := strings.TrimPrefix(r.URL.Path, "/api/tasks/")
+	id, err := strconv.Atoi(idStr)
+	if err != nil {
+		http.Error(w, "Invalid task ID", http.StatusBadRequest)
+		return
+	}
+
+	switch r.Method {
+	case http.MethodPut:
+		var body struct {
+			Status   string `json:"status"`
+			Priority string `json:"priority"`
+			Title    string `json:"title"`
+			DueDate  string `json:"due_date"`
+			Notes    string `json:"notes"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			http.Error(w, "Invalid JSON", http.StatusBadRequest)
+			return
+		}
+		if err := s.taskStore.UpdateTask(id, body.Status, body.Priority, body.Title, body.DueDate, body.Notes); err != nil {
+			http.Error(w, fmt.Sprintf("Failed to update task: %v", err), http.StatusBadRequest)
+			return
+		}
+		s.logf("INFO", "Task #%d updated via web UI", id)
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
+
+	case http.MethodDelete:
+		if err := s.taskStore.DeleteTask(id); err != nil {
+			http.Error(w, fmt.Sprintf("Failed to delete task: %v", err), http.StatusBadRequest)
+			return
+		}
+		s.logf("INFO", "Task #%d deleted via web UI", id)
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
+
+	default:
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+	}
+}
+
+// --- Note handlers ---
+
+func (s *Server) handleNotes(w http.ResponseWriter, r *http.Request) {
+	if !s.requireAuth(w, r) {
+		return
+	}
+	if s.noteStore == nil {
+		http.Error(w, "Note store not available", http.StatusServiceUnavailable)
+		return
+	}
+
+	switch r.Method {
+	case http.MethodGet:
+		notes, err := s.noteStore.ListNotes()
+		if err != nil {
+			http.Error(w, "Failed to list notes", http.StatusInternalServerError)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]interface{}{"notes": notes})
+
+	case http.MethodPost:
+		var body struct {
+			Name    string `json:"name"`
+			Content string `json:"content"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			http.Error(w, "Invalid JSON", http.StatusBadRequest)
+			return
+		}
+		if body.Name == "" {
+			http.Error(w, "Name is required", http.StatusBadRequest)
+			return
+		}
+		if err := s.noteStore.SaveNote(body.Name, body.Content); err != nil {
+			http.Error(w, fmt.Sprintf("Failed to save note: %v", err), http.StatusBadRequest)
+			return
+		}
+		s.logf("INFO", "Note '%s' created via web UI", body.Name)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusCreated)
+		json.NewEncoder(w).Encode(map[string]string{"status": "ok", "name": body.Name})
+
+	default:
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+	}
+}
+
+func (s *Server) handleNotesSearch(w http.ResponseWriter, r *http.Request) {
+	if !s.requireAuth(w, r) {
+		return
+	}
+	if s.noteStore == nil {
+		http.Error(w, "Note store not available", http.StatusServiceUnavailable)
+		return
+	}
+	if r.Method != http.MethodGet {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	query := r.URL.Query().Get("q")
+	if query == "" {
+		http.Error(w, "Query parameter 'q' required", http.StatusBadRequest)
+		return
+	}
+
+	results, err := s.noteStore.SearchNotes(query)
+	if err != nil {
+		http.Error(w, "Search failed", http.StatusInternalServerError)
+		return
+	}
+	if results == nil {
+		results = []skills.Note{}
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{"notes": results})
+}
+
+func (s *Server) handleNoteByName(w http.ResponseWriter, r *http.Request) {
+	if !s.requireAuth(w, r) {
+		return
+	}
+	if s.noteStore == nil {
+		http.Error(w, "Note store not available", http.StatusServiceUnavailable)
+		return
+	}
+
+	name := strings.TrimPrefix(r.URL.Path, "/api/notes/")
+	if name == "" || name == "search" {
+		http.Error(w, "Note name required", http.StatusBadRequest)
+		return
+	}
+
+	switch r.Method {
+	case http.MethodGet:
+		content, err := s.noteStore.ReadNote(name)
+		if err != nil {
+			http.Error(w, fmt.Sprintf("Note not found: %v", err), http.StatusNotFound)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]string{"name": name, "content": content})
+
+	case http.MethodPut:
+		var body struct {
+			Content string `json:"content"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			http.Error(w, "Invalid JSON", http.StatusBadRequest)
+			return
+		}
+		if err := s.noteStore.SaveNote(name, body.Content); err != nil {
+			http.Error(w, fmt.Sprintf("Failed to save note: %v", err), http.StatusBadRequest)
+			return
+		}
+		s.logf("INFO", "Note '%s' updated via web UI", name)
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
+
+	case http.MethodDelete:
+		if err := s.noteStore.DeleteNote(name); err != nil {
+			http.Error(w, fmt.Sprintf("Failed to delete note: %v", err), http.StatusBadRequest)
+			return
+		}
+		s.logf("INFO", "Note '%s' deleted via web UI", name)
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
+
+	default:
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+	}
 }
 
 func truncateLog(s string, maxLen int) string {

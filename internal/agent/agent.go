@@ -36,6 +36,8 @@ type Agent struct {
 	scheduler *cron.Scheduler
 	skillpack *skillpack.Loader
 	health    *health.Checker
+	taskStore *skills.TaskStore
+	noteStore *skills.NoteStore
 	// supportsTools indicates whether the LLM provider supports tool/function calling.
 	supportsTools bool
 }
@@ -99,6 +101,9 @@ func New(cfg *config.Config, dataDir string) (*Agent, error) {
 		log.Printf("Note: %s provider runs in text-only mode (no tool calling). For full agent capabilities, use an OpenAI-compatible provider.", provider.Name())
 	}
 
+	// Register productivity skills (tasks, notes)
+	ts, ns := skills.RegisterProductivitySkills(skillRegistry, dataDir)
+
 	// Initialize health checker
 	hc := health.NewChecker(Version, provider.Name(), cfg.LLM.Model, len(skillRegistry.AsTools()))
 
@@ -111,14 +116,13 @@ func New(cfg *config.Config, dataDir string) (*Agent, error) {
 		workspace:     ws,
 		skillpack:     skillLoader,
 		health:        hc,
+		taskStore:     ts,
+		noteStore:     ns,
 		supportsTools: supportsTools,
 	}
 
 	// Register workspace skills
 	agent.registerWorkspaceSkills()
-
-	// Register productivity skills (tasks, notes)
-	skills.RegisterProductivitySkills(skillRegistry, dataDir)
 
 	// Register email skill if configured
 	var emailNotifier *notify.EmailNotifier
@@ -548,6 +552,16 @@ func (a *Agent) SkillPack() *skillpack.Loader {
 // Health returns the agent's health checker.
 func (a *Agent) Health() *health.Checker {
 	return a.health
+}
+
+// TaskStore returns the agent's task store.
+func (a *Agent) TaskStore() *skills.TaskStore {
+	return a.taskStore
+}
+
+// NoteStore returns the agent's note store.
+func (a *Agent) NoteStore() *skills.NoteStore {
+	return a.noteStore
 }
 
 // HealthCheck returns the agent's health status.
