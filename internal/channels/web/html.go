@@ -468,6 +468,8 @@ const indexHTML = `<!DOCTYPE html>
     <button onclick="openPanel('workspace')">&#x1f4c1; Workspace</button>
     <button onclick="openPanel('scheduler')">&#x23f0; Scheduler</button>
     <button onclick="openPanel('skills')">&#x1f9e9; Skills</button>
+    <button onclick="openPanel('knowledge')">&#x1f9e0; Knowledge</button>
+    <button onclick="openPanel('mcp')">&#x1f50c; MCP Servers</button>
   </div>
   <div class="sidebar-footer">
     <div class="token-display" id="tokenDisplay"></div>
@@ -509,6 +511,8 @@ const indexHTML = `<!DOCTYPE html>
         <div class="sc-item"><kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>N</kbd> Notes</div>
         <div class="sc-item"><kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>W</kbd> Workspace</div>
         <div class="sc-item"><kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>J</kbd> Scheduler</div>
+        <div class="sc-item"><kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>G</kbd> Knowledge</div>
+        <div class="sc-item"><kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>M</kbd> MCP</div>
         <div class="sc-item"><kbd>Ctrl</kbd>+<kbd>S</kbd> Save note/file</div>
       </div>
     </div>
@@ -840,6 +844,75 @@ const indexHTML = `<!DOCTYPE html>
   </div>
 </div>
 
+<!-- Knowledge Graph panel -->
+<div class="panel" id="knowledgePanel">
+  <div class="panel-header">
+    <h3>Knowledge Graph</h3>
+    <div class="panel-header-btns">
+      <button onclick="fetchKnowledge()">Refresh</button>
+      <button onclick="closeAllPanels()">Close</button>
+    </div>
+  </div>
+  <div class="panel-content">
+    <div style="padding:12px;display:flex;gap:8px;border-bottom:1px solid var(--border);">
+      <input type="text" id="kgSearch" placeholder="Search entities..." style="flex:1;padding:8px 12px;background:var(--bg3);border:1px solid var(--border);border-radius:6px;color:var(--text);font-size:13px;" onkeydown="if(event.key==='Enter')searchKnowledge()" />
+      <button onclick="searchKnowledge()" style="padding:8px 16px;background:var(--accent);color:#000;border:none;border-radius:6px;font-size:13px;font-weight:600;cursor:pointer;">Search</button>
+    </div>
+    <div id="kgStats" style="padding:12px;border-bottom:1px solid var(--border);display:flex;gap:16px;flex-wrap:wrap;"></div>
+    <div id="kgEntities" style="padding:12px;">
+      <div class="panel-empty">Loading knowledge graph...</div>
+    </div>
+  </div>
+  <div class="panel-footer">
+    <span id="kgCount">0 entities</span>
+    <span></span>
+  </div>
+</div>
+
+<!-- MCP Servers panel -->
+<div class="panel" id="mcpPanel">
+  <div class="panel-header">
+    <h3>MCP Servers</h3>
+    <div class="panel-header-btns">
+      <button onclick="fetchMCP()">Refresh</button>
+      <button onclick="closeAllPanels()">Close</button>
+    </div>
+  </div>
+  <div class="panel-content">
+    <div style="padding:12px;border-bottom:1px solid var(--border);">
+      <div style="font-size:12px;color:var(--text2);margin-bottom:8px;">Connect to MCP servers to extend PennyClaw with external tools (filesystem, GitHub, Slack, databases, etc.)</div>
+      <details style="margin-top:8px;">
+        <summary style="cursor:pointer;font-size:13px;color:var(--accent);font-weight:600;">+ Add MCP Server</summary>
+        <div style="margin-top:12px;display:flex;flex-direction:column;gap:8px;">
+          <input type="text" id="mcpName" placeholder="Server name (e.g., github)" style="padding:8px 12px;background:var(--bg3);border:1px solid var(--border);border-radius:6px;color:var(--text);font-size:13px;" />
+          <select id="mcpTransport" style="padding:8px 12px;background:var(--bg3);border:1px solid var(--border);border-radius:6px;color:var(--text);font-size:13px;" onchange="toggleMCPFields()">
+            <option value="stdio">stdio (local command)</option>
+            <option value="sse">SSE (HTTP URL)</option>
+          </select>
+          <div id="mcpStdioFields">
+            <input type="text" id="mcpCommand" placeholder="Command (e.g., npx)" style="width:100%;padding:8px 12px;background:var(--bg3);border:1px solid var(--border);border-radius:6px;color:var(--text);font-size:13px;margin-bottom:8px;" />
+            <input type="text" id="mcpArgs" placeholder="Args (comma-separated, e.g., -y,@modelcontextprotocol/server-github)" style="width:100%;padding:8px 12px;background:var(--bg3);border:1px solid var(--border);border-radius:6px;color:var(--text);font-size:13px;" />
+          </div>
+          <div id="mcpSSEFields" style="display:none;">
+            <input type="text" id="mcpURL" placeholder="Server URL (e.g., http://localhost:3001/sse)" style="width:100%;padding:8px 12px;background:var(--bg3);border:1px solid var(--border);border-radius:6px;color:var(--text);font-size:13px;" />
+          </div>
+          <input type="text" id="mcpEnv" placeholder="Env vars (KEY=value,KEY2=value2)" style="padding:8px 12px;background:var(--bg3);border:1px solid var(--border);border-radius:6px;color:var(--text);font-size:13px;" />
+          <button onclick="connectMCP()" style="padding:8px 16px;background:var(--accent);color:#000;border:none;border-radius:6px;font-size:13px;font-weight:600;cursor:pointer;">Connect</button>
+        </div>
+      </details>
+    </div>
+    <div id="mcpConnections" style="padding:12px;">
+      <div class="panel-empty">Loading MCP connections...</div>
+    </div>
+    <div id="mcpTools" style="padding:12px;border-top:1px solid var(--border);">
+    </div>
+  </div>
+  <div class="panel-footer">
+    <span id="mcpCount">0 servers</span>
+    <span></span>
+  </div>
+</div>
+
 <!-- Toast container -->
 <div class="toast-container" id="toastContainer"></div>
 
@@ -1149,6 +1222,8 @@ function openPanel(name) {
   if (name === 'workspace') { fetchWorkspace(); }
   if (name === 'scheduler') { fetchCronJobs(); }
   if (name === 'skills') { fetchSkills(); }
+  if (name === 'knowledge') { fetchKnowledge(); }
+  if (name === 'mcp') { fetchMCP(); }
 }
 
 function closeAllPanels() {
@@ -1197,7 +1272,7 @@ function renderSessions(sessions) {
 function newChat() {
   sessionId = 'web-' + Date.now();
   isWelcome = true;
-  chat.innerHTML = '<div class="welcome"><h2>Welcome to PennyClaw</h2><p>Your $0/month personal AI agent. Type a message to get started.</p><div class="shortcuts"><div class="sc-item"><kbd>Ctrl</kbd>+<kbd>K</kbd> New chat</div><div class="sc-item"><kbd>Ctrl</kbd>+<kbd>L</kbd> Clear</div><div class="sc-item"><kbd>Ctrl</kbd>+<kbd>E</kbd> Export</div><div class="sc-item"><kbd>Esc</kbd> Close panels</div><div class="sc-item"><kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>H</kbd> Health</div><div class="sc-item"><kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>T</kbd> Tasks</div><div class="sc-item"><kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>N</kbd> Notes</div><div class="sc-item"><kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>W</kbd> Workspace</div><div class="sc-item"><kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>J</kbd> Scheduler</div><div class="sc-item"><kbd>Ctrl</kbd>+<kbd>S</kbd> Save note/file</div></div></div>';
+  chat.innerHTML = '<div class="welcome"><h2>Welcome to PennyClaw</h2><p>Your $0/month personal AI agent. Type a message to get started.</p><div class="shortcuts"><div class="sc-item"><kbd>Ctrl</kbd>+<kbd>K</kbd> New chat</div><div class="sc-item"><kbd>Ctrl</kbd>+<kbd>L</kbd> Clear</div><div class="sc-item"><kbd>Ctrl</kbd>+<kbd>E</kbd> Export</div><div class="sc-item"><kbd>Esc</kbd> Close panels</div><div class="sc-item"><kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>H</kbd> Health</div><div class="sc-item"><kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>T</kbd> Tasks</div><div class="sc-item"><kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>N</kbd> Notes</div><div class="sc-item"><kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>W</kbd> Workspace</div><div class="sc-item"><kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>J</kbd> Scheduler</div><div class="sc-item"><kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>G</kbd> Knowledge</div><div class="sc-item"><kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>M</kbd> MCP</div><div class="sc-item"><kbd>Ctrl</kbd>+<kbd>S</kbd> Save note/file</div></div></div>';
   $('chatTitle').textContent = 'New Chat';
   input.focus();
   loadSessions();
@@ -2547,6 +2622,206 @@ async function installSkill(source, identifier) {
   }
 }
 
+// ===== Knowledge Graph =====
+async function fetchKnowledge() {
+  try {
+    const [entRes, statsRes] = await Promise.all([
+      apiFetch('/api/knowledge?limit=100'),
+      apiFetch('/api/knowledge/stats')
+    ]);
+    const entData = await entRes.json();
+    const statsData = await statsRes.json();
+    renderKnowledgeStats(statsData);
+    renderKnowledgeEntities(entData.entities || []);
+  } catch (e) {
+    $('kgEntities').innerHTML = '<div class="panel-empty">Failed to load knowledge graph</div>';
+  }
+}
+
+function renderKnowledgeStats(stats) {
+  const el = $('kgStats');
+  if (!stats || stats.error) {
+    el.innerHTML = '<div style="color:var(--text2);font-size:12px;">Knowledge graph not yet initialized. Chat with PennyClaw to start building it.</div>';
+    return;
+  }
+  function statBox(val, label) { return '<div style="background:var(--bg3);padding:8px 14px;border-radius:8px;min-width:80px;"><div style="font-size:20px;font-weight:700;">' + (val || 0) + '</div><div style="font-size:10px;color:var(--text2);text-transform:uppercase;">' + label + '</div></div>'; }
+  el.innerHTML = statBox(stats.entities, 'Entities') + statBox(stats.relations, 'Relations') + statBox(Math.round((stats.avg_strength || 0) * 100) + '%', 'Avg Strength') + statBox(stats.decay_rate, 'Decay Rate');
+}
+
+function renderKnowledgeEntities(entities) {
+  const el = $('kgEntities');
+  $('kgCount').textContent = entities.length + ' entities';
+  if (!entities.length) {
+    el.innerHTML = '<div class="panel-empty">No entities yet. Chat with PennyClaw to build your knowledge graph.</div>';
+    return;
+  }
+  const typeColors = { person: '#4fc3f7', place: '#81c784', concept: '#ba68c8', event: '#ffb74d', tool: '#f06292', organization: '#aed581', default: '#90a4ae' };
+  el.innerHTML = entities.map(e => {
+    const color = typeColors[e.type] || typeColors.default;
+    const strength = Math.round((e.strength || 0) * 100);
+    const strengthColor = strength > 70 ? 'var(--success)' : strength > 30 ? 'var(--warn)' : 'var(--error)';
+    var h = '<div style="padding:10px 12px;border:1px solid var(--border);border-radius:8px;margin-bottom:8px;display:flex;align-items:center;justify-content:space-between;">';
+    h += '<div style="flex:1;">';
+    h += '<div style="display:flex;align-items:center;gap:8px;">';
+    h += '<span style="background:' + color + ';color:#000;padding:1px 6px;border-radius:4px;font-size:10px;font-weight:600;text-transform:uppercase;">' + (e.type || 'unknown') + '</span>';
+    h += '<span style="font-weight:600;font-size:14px;">' + escapeHtml(e.name || '') + '</span>';
+    h += '</div>';
+    if (e.description) h += '<div style="font-size:12px;color:var(--text2);margin-top:4px;">' + escapeHtml(e.description) + '</div>';
+    h += '<div style="font-size:11px;color:var(--text3);margin-top:4px;">Strength: <span style="color:' + strengthColor + ';font-weight:600;">' + strength + '%</span></div>';
+    h += '</div>';
+    h += '<div style="display:flex;gap:4px;">';
+    h += '<button onclick="viewEntityRelations(' + e.id + ')" style="background:var(--bg3);border:1px solid var(--border);color:var(--text2);padding:4px 8px;border-radius:4px;font-size:11px;cursor:pointer;" title="View relations">&#x1f517;</button>';
+    h += '<button onclick="deleteEntity(' + e.id + ')" style="background:none;border:1px solid var(--border);color:var(--error);padding:4px 8px;border-radius:4px;font-size:11px;cursor:pointer;" title="Delete">&times;</button>';
+    h += '</div></div>';
+    return h;
+  }).join('');
+}
+
+async function searchKnowledge() {
+  const q = $('kgSearch').value.trim();
+  if (!q) { fetchKnowledge(); return; }
+  try {
+    const res = await apiFetch('/api/knowledge/search?q=' + encodeURIComponent(q));
+    const data = await res.json();
+    renderKnowledgeEntities(data.entities || []);
+  } catch (e) {
+    showToast('Search failed', 'error');
+  }
+}
+
+async function viewEntityRelations(id) {
+  try {
+    const res = await apiFetch('/api/knowledge/' + id + '/relations');
+    const data = await res.json();
+    const relations = data.relations || [];
+    if (!relations.length) { showToast('No relations found for this entity', 'info'); return; }
+    const html = relations.map(r => '<div style="padding:6px 0;border-bottom:1px solid var(--border);font-size:13px;"><span style="color:var(--text3);font-size:11px;">' + escapeHtml(r.direction || '') + '</span> <span style="color:var(--accent);font-weight:600;">' + escapeHtml(r.type || '') + '</span> <strong>' + escapeHtml(r.related_name || '') + '</strong> <span style="background:var(--bg3);padding:1px 6px;border-radius:3px;font-size:10px;">' + escapeHtml(r.related_type || '') + '</span> <span style="color:var(--text3);font-size:11px;">(strength: ' + Math.round((r.strength || 0) * 100) + '%)</span></div>').join('');
+    $('kgEntities').innerHTML = '<div style="margin-bottom:12px;"><button onclick="fetchKnowledge()" style="background:var(--bg3);border:1px solid var(--border);color:var(--text2);padding:4px 12px;border-radius:4px;font-size:12px;cursor:pointer;">&larr; Back to entities</button></div>' + html;
+  } catch (e) {
+    showToast('Failed to load relations', 'error');
+  }
+}
+
+async function deleteEntity(id) {
+  if (!confirm('Delete this entity and all its relations?')) return;
+  try {
+    await apiFetch('/api/knowledge/' + id, { method: 'DELETE' });
+    showToast('Entity deleted', 'success');
+    fetchKnowledge();
+  } catch (e) {
+    showToast('Failed to delete entity', 'error');
+  }
+}
+
+// ===== MCP Servers =====
+async function fetchMCP() {
+  try {
+    const res = await apiFetch('/api/mcp');
+    const data = await res.json();
+    renderMCPConnections(data.connections || []);
+    renderMCPTools(data.tools || []);
+  } catch (e) {
+    $('mcpConnections').innerHTML = '<div class="panel-empty">Failed to load MCP connections</div>';
+  }
+}
+
+function renderMCPConnections(connections) {
+  const el = $('mcpConnections');
+  $('mcpCount').textContent = connections.length + ' servers';
+  if (!connections.length) {
+    el.innerHTML = '<div class="panel-empty">No MCP servers connected. Add one above to extend PennyClaw with external tools.</div>';
+    return;
+  }
+  el.innerHTML = connections.map(c => {
+    const name = c.name || 'Unknown';
+    const transport = c.transport || 'stdio';
+    const tools = c.tools || 0;
+    const enabled = c.enabled !== false;
+    var h = '<div style="padding:10px 12px;border:1px solid var(--border);border-radius:8px;margin-bottom:8px;display:flex;align-items:center;justify-content:space-between;">';
+    h += '<div><div style="display:flex;align-items:center;gap:8px;">';
+    h += '<span style="width:8px;height:8px;border-radius:50%;background:' + (enabled ? 'var(--success)' : 'var(--error)') + ';"></span>';
+    h += '<span style="font-weight:600;font-size:14px;">' + escapeHtml(name) + '</span>';
+    h += '<span style="font-size:11px;color:var(--text3);background:var(--bg3);padding:1px 6px;border-radius:3px;">' + transport + '</span>';
+    h += '</div>';
+    h += '<div style="font-size:12px;color:var(--text2);margin-top:4px;">' + tools + ' tool' + (tools !== 1 ? 's' : '') + ' available</div>';
+    h += '</div>';
+    h += '<button onclick="disconnectMCP(\'' + escapeHtml(name) + '\')" style="background:none;border:1px solid var(--error);color:var(--error);padding:4px 12px;border-radius:4px;font-size:12px;cursor:pointer;">Disconnect</button>';
+    h += '</div>';
+    return h;
+  }).join('');
+}
+
+function renderMCPTools(tools) {
+  const el = $('mcpTools');
+  if (!tools.length) { el.innerHTML = ''; return; }
+  el.innerHTML = '<div style="font-size:12px;font-weight:600;color:var(--text2);text-transform:uppercase;margin-bottom:8px;">Available Tools (' + tools.length + ')</div>' +
+    tools.map(t => {
+      const name = t.name || t;
+      const desc = t.description || '';
+      const server = t.server || '';
+      var h = '<div style="padding:6px 8px;border-bottom:1px solid var(--border);font-size:12px;">';
+      h += '<span style="font-weight:600;color:var(--accent);">' + escapeHtml(typeof name === 'string' ? name : JSON.stringify(name)) + '</span>';
+      if (server) h += '<span style="color:var(--text3);"> via ' + escapeHtml(server) + '</span>';
+      if (desc) h += '<div style="color:var(--text2);margin-top:2px;">' + escapeHtml(desc) + '</div>';
+      h += '</div>';
+      return h;
+    }).join('');
+}
+
+function toggleMCPFields() {
+  const transport = $('mcpTransport').value;
+  $('mcpStdioFields').style.display = transport === 'stdio' ? 'block' : 'none';
+  $('mcpSSEFields').style.display = transport === 'sse' ? 'block' : 'none';
+}
+
+async function connectMCP() {
+  const name = $('mcpName').value.trim();
+  const transport = $('mcpTransport').value;
+  if (!name) { showToast('Server name is required', 'error'); return; }
+  const cfg = { name, transport };
+  if (transport === 'stdio') {
+    cfg.command = $('mcpCommand').value.trim();
+    const argsStr = $('mcpArgs').value.trim();
+    cfg.args = argsStr ? argsStr.split(',').map(a => a.trim()) : [];
+    if (!cfg.command) { showToast('Command is required for stdio transport', 'error'); return; }
+  } else {
+    cfg.url = $('mcpURL').value.trim();
+    if (!cfg.url) { showToast('URL is required for SSE transport', 'error'); return; }
+  }
+  const envStr = $('mcpEnv').value.trim();
+  if (envStr) {
+    cfg.env = {};
+    envStr.split(',').forEach(pair => {
+      const [k, ...v] = pair.split('=');
+      if (k) cfg.env[k.trim()] = v.join('=').trim();
+    });
+  }
+  try {
+    const res = await apiFetch('/api/mcp/connect', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(cfg) });
+    if (!res.ok) { const t = await res.text(); throw new Error(t); }
+    showToast('Connected to ' + name, 'success');
+    $('mcpName').value = '';
+    $('mcpCommand').value = '';
+    $('mcpArgs').value = '';
+    $('mcpURL').value = '';
+    $('mcpEnv').value = '';
+    fetchMCP();
+  } catch (e) {
+    showToast('Failed to connect: ' + e.message, 'error');
+  }
+}
+
+async function disconnectMCP(name) {
+  if (!confirm('Disconnect MCP server "' + name + '"?')) return;
+  try {
+    await apiFetch('/api/mcp/disconnect', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name }) });
+    showToast('Disconnected ' + name, 'success');
+    fetchMCP();
+  } catch (e) {
+    showToast('Failed to disconnect', 'error');
+  }
+}
+
 // ===== SSE Real-time Notifications =====
 let sseSource = null;
 function initSSE() {
@@ -2604,6 +2879,10 @@ document.addEventListener('keydown', e => {
   if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key === 'W') { e.preventDefault(); openPanel('workspace'); }
   // Ctrl+Shift+J: Scheduler panel
   if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key === 'J') { e.preventDefault(); openPanel('scheduler'); }
+  // Ctrl+Shift+G: Knowledge Graph panel
+  if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key === 'G') { e.preventDefault(); openPanel('knowledge'); }
+  // Ctrl+Shift+M: MCP panel
+  if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key === 'M') { e.preventDefault(); openPanel('mcp'); }
   // Ctrl+S: Save note (when in note editor) or workspace file (when in ws editor)
   if ((e.ctrlKey || e.metaKey) && e.key === 's' && !e.shiftKey) {
     if (currentPanel === 'notes' && !$('noteEditorView').classList.contains('hidden')) {

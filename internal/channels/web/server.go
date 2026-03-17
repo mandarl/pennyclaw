@@ -24,6 +24,8 @@ import (
 	"github.com/mandarl/pennyclaw/internal/cron"
 	"github.com/mandarl/pennyclaw/internal/health"
 	"github.com/mandarl/pennyclaw/internal/memory"
+	"github.com/mandarl/pennyclaw/internal/knowledge"
+	"github.com/mandarl/pennyclaw/internal/mcp"
 	"github.com/mandarl/pennyclaw/internal/skillpack"
 	"github.com/mandarl/pennyclaw/internal/skills"
 	"github.com/mandarl/pennyclaw/internal/workspace"
@@ -133,6 +135,8 @@ type Server struct {
 	health     *health.Checker
 	taskStore  *skills.TaskStore
 	noteStore  *skills.NoteStore
+	graph      *knowledge.Graph
+	mcpMgr     *mcp.Manager
 
 	// SSE notification channels
 	sseClients   map[chan string]bool
@@ -185,7 +189,7 @@ func (s *Server) logf(level, format string, args ...interface{}) {
 }
 
 // NewServer creates a new web UI server.
-func NewServer(host string, port int, handler MessageHandler, cfg *config.Config, cfgPath string, mem *memory.Store, version string, ws *workspace.Workspace, sched *cron.Scheduler, sp *skillpack.Loader, wh *webhook.Handler, hc *health.Checker, ts *skills.TaskStore, ns *skills.NoteStore) *Server {
+func NewServer(host string, port int, handler MessageHandler, cfg *config.Config, cfgPath string, mem *memory.Store, version string, ws *workspace.Workspace, sched *cron.Scheduler, sp *skillpack.Loader, wh *webhook.Handler, hc *health.Checker, ts *skills.TaskStore, ns *skills.NoteStore, kg *knowledge.Graph, mcpMgr *mcp.Manager) *Server {
 	s := &Server{
 		host:      host,
 		port:      port,
@@ -204,6 +208,8 @@ func NewServer(host string, port int, handler MessageHandler, cfg *config.Config
 		health:    hc,
 		taskStore: ts,
 		noteStore: ns,
+		graph:     kg,
+		mcpMgr:    mcpMgr,
 	}
 
 	// Set up upload directory
@@ -282,6 +288,18 @@ func (s *Server) Start() error {
 	mux.HandleFunc("/api/notes", s.handleNotes)
 	mux.HandleFunc("/api/notes/search", s.handleNotesSearch)
 	mux.HandleFunc("/api/notes/", s.handleNoteByName)
+
+	// Knowledge Graph endpoints
+	mux.HandleFunc("/api/knowledge", s.handleKnowledgeEntities)
+	mux.HandleFunc("/api/knowledge/search", s.handleKnowledgeSearch)
+	mux.HandleFunc("/api/knowledge/stats", s.handleKnowledgeStats)
+	mux.HandleFunc("/api/knowledge/", s.handleKnowledgeEntity)
+
+	// MCP endpoints
+	mux.HandleFunc("/api/mcp", s.handleMCPConnections)
+	mux.HandleFunc("/api/mcp/connect", s.handleMCPConnect)
+	mux.HandleFunc("/api/mcp/disconnect", s.handleMCPDisconnect)
+	mux.HandleFunc("/api/mcp/tools", s.handleMCPTools)
 
 	// Skillpack endpoints
 	mux.HandleFunc("/api/skills", s.handleSkillsList)
@@ -1678,3 +1696,235 @@ func (s *Server) handleSSE(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+
+// ─── Knowledge Graph Handlers ───────────────────────────────────────────────
+
+// handleKnowledgeEntities handles GET /api/knowledge — list all entities.
+func (s *Server) handleKnowledgeEntities(w http.ResponseWriter, r *http.Request) {
+	if !s.requireAuth(w, r) {
+		return
+	}
+	if r.Method != http.MethodGet {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	if s.graph == nil {
+		json.NewEncoder(w).Encode(map[string]interface{}{"entities": []interface{}{}, "error": "Knowledge graph not initialized"})
+		return
+	}
+	limit := 100
+	if l := r.URL.Query().Get("limit"); l != "" {
+		if n, err := strconv.Atoi(l); err == nil && n > 0 {
+			limit = n
+		}
+	}
+	entities, err := s.graph.AllEntities(limit)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{"entities": entities})
+}
+
+// handleKnowledgeSearch handles GET /api/knowledge/search?q=term.
+func (s *Server) handleKnowledgeSearch(w http.ResponseWriter, r *http.Request) {
+	if !s.requireAuth(w, r) {
+		return
+	}
+	if s.graph == nil {
+		json.NewEncoder(w).Encode(map[string]interface{}{"entities": []interface{}{}})
+		return
+	}
+	q := r.URL.Query().Get("q")
+	if q == "" {
+		http.Error(w, "missing q parameter", http.StatusBadRequest)
+		return
+	}
+	limit := 20
+	if l := r.URL.Query().Get("limit"); l != "" {
+		if n, err := strconv.Atoi(l); err == nil && n > 0 {
+			limit = n
+		}
+	}
+	entities, err := s.graph.Query(q, limit)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{"entities": entities})
+}
+
+// handleKnowledgeStats handles GET /api/knowledge/stats.
+func (s *Server) handleKnowledgeStats(w http.ResponseWriter, r *http.Request) {
+	if !s.requireAuth(w, r) {
+		return
+	}
+	if s.graph == nil {
+		json.NewEncoder(w).Encode(map[string]interface{}{"error": "Knowledge graph not initialized"})
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(s.graph.Stats())
+}
+
+// handleKnowledgeEntity handles GET/DELETE /api/knowledge/{id} and GET /api/knowledge/{id}/relations.
+func (s *Server) handleKnowledgeEntity(w http.ResponseWriter, r *http.Request) {
+	if !s.requireAuth(w, r) {
+		return
+	}
+	if s.graph == nil {
+		http.Error(w, "Knowledge graph not initialized", http.StatusServiceUnavailable)
+		return
+	}
+	path := strings.TrimPrefix(r.URL.Path, "/api/knowledge/")
+	parts := strings.Split(path, "/")
+	if len(parts) == 0 || parts[0] == "" {
+		http.Error(w, "missing entity ID", http.StatusBadRequest)
+		return
+	}
+	id, err := strconv.ParseInt(parts[0], 10, 64)
+	if err != nil {
+		http.Error(w, "invalid entity ID", http.StatusBadRequest)
+		return
+	}
+
+	// GET /api/knowledge/{id}/relations
+	if len(parts) > 1 && parts[1] == "relations" {
+		if r.Method != http.MethodGet {
+			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		relations, err := s.graph.GetRelations(id)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]interface{}{"relations": relations})
+		return
+	}
+
+	// DELETE /api/knowledge/{id}
+	if r.Method == http.MethodDelete {
+		if err := s.graph.DeleteEntity(id); err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]string{"status": "deleted"})
+		return
+	}
+
+	http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+}
+
+// ─── MCP Handlers ───────────────────────────────────────────────────────────
+
+// handleMCPConnections handles GET /api/mcp — list connected MCP servers.
+func (s *Server) handleMCPConnections(w http.ResponseWriter, r *http.Request) {
+	if !s.requireAuth(w, r) {
+		return
+	}
+	if r.Method != http.MethodGet {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	if s.mcpMgr == nil {
+		json.NewEncoder(w).Encode(map[string]interface{}{"connections": []interface{}{}, "error": "MCP manager not initialized"})
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"connections": s.mcpMgr.Connections(),
+		"tools":       s.mcpMgr.Tools(),
+	})
+}
+
+// handleMCPConnect handles POST /api/mcp/connect — connect to an MCP server.
+func (s *Server) handleMCPConnect(w http.ResponseWriter, r *http.Request) {
+	if !s.requireAuth(w, r) {
+		return
+	}
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	if s.mcpMgr == nil {
+		http.Error(w, "MCP manager not initialized", http.StatusServiceUnavailable)
+		return
+	}
+	var cfg mcp.ServerConfig
+	if err := json.NewDecoder(r.Body).Decode(&cfg); err != nil {
+		http.Error(w, "invalid request body", http.StatusBadRequest)
+		return
+	}
+	cfg.Enabled = true
+	if err := s.mcpMgr.Connect(r.Context(), cfg); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	// Save config for auto-reconnect
+	configs, _ := s.mcpMgr.LoadConfigs()
+	configs = append(configs, cfg)
+	_ = s.mcpMgr.SaveConfigs(configs)
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]string{"status": "connected", "name": cfg.Name})
+}
+
+// handleMCPDisconnect handles POST /api/mcp/disconnect — disconnect from an MCP server.
+func (s *Server) handleMCPDisconnect(w http.ResponseWriter, r *http.Request) {
+	if !s.requireAuth(w, r) {
+		return
+	}
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	if s.mcpMgr == nil {
+		http.Error(w, "MCP manager not initialized", http.StatusServiceUnavailable)
+		return
+	}
+	var req struct {
+		Name string `json:"name"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "invalid request body", http.StatusBadRequest)
+		return
+	}
+	if err := s.mcpMgr.Disconnect(req.Name); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	// Remove from saved configs
+	configs, _ := s.mcpMgr.LoadConfigs()
+	var filtered []mcp.ServerConfig
+	for _, c := range configs {
+		if c.Name != req.Name {
+			filtered = append(filtered, c)
+		}
+	}
+	_ = s.mcpMgr.SaveConfigs(filtered)
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]string{"status": "disconnected"})
+}
+
+// handleMCPTools handles GET /api/mcp/tools — list all available MCP tools.
+func (s *Server) handleMCPTools(w http.ResponseWriter, r *http.Request) {
+	if !s.requireAuth(w, r) {
+		return
+	}
+	if r.Method != http.MethodGet {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	if s.mcpMgr == nil {
+		json.NewEncoder(w).Encode(map[string]interface{}{"tools": []interface{}{}})
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{"tools": s.mcpMgr.Tools()})
+}

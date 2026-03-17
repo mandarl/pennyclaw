@@ -108,6 +108,16 @@ PennyClaw ships with a comprehensive set of tools the agent can invoke:
 | **Notes** | `note_delete` | Remove notes |
 | **Notes** | `note_search` | Full-text search with snippet extraction |
 | **Email** | `send_email` | Send email notifications via SMTP |
+| **Knowledge** | `knowledge_add` | Add entities (people, places, concepts) to the knowledge graph |
+| **Knowledge** | `knowledge_relate` | Create relationships between entities |
+| **Knowledge** | `knowledge_query` | Search the knowledge graph by name |
+| **Knowledge** | `knowledge_relations` | Get all relationships for an entity |
+| **Knowledge** | `knowledge_delete` | Remove an entity and its relations |
+| **Knowledge** | `knowledge_stats` | Get knowledge graph statistics |
+| **MCP** | `mcp_connect` | Connect to an MCP server (stdio or SSE transport) |
+| **MCP** | `mcp_disconnect` | Disconnect from an MCP server |
+| **MCP** | `mcp_list` | List connected MCP servers and their tools |
+| **MCP** | `mcp_call` | Call a tool on a connected MCP server |
 
 Skills can also be loaded from external YAML/JSON bundles via the skill pack system, allowing you to extend PennyClaw without modifying Go code.
 
@@ -134,6 +144,26 @@ The embedded web interface includes:
 - Drag-and-drop file upload
 - Notification sound when responses arrive
 - Keyboard shortcuts: Ctrl+K (new chat), Ctrl+L (clear), Ctrl+E (export), Esc (close panels)
+
+### Knowledge Graph with Memory Decay
+
+PennyClaw maintains a knowledge graph that learns about your world over time. Entities (people, places, concepts, preferences, projects) are stored with weighted relationships and subject to **Ebbinghaus memory decay** — memories that are never reinforced gradually fade, keeping the graph lean and relevant.
+
+- **Automatic context injection** — The strongest memories are included in every system prompt, giving the agent persistent awareness
+- **Ebbinghaus forgetting curve** — Strength decays exponentially over time: `S(t) = S₀ × e^(-λt)`
+- **Spacing effect** — Frequently accessed memories decay slower (adjusted by access count)
+- **Automatic pruning** — Entities below the strength threshold are removed to save memory
+- **Web UI panel** — Browse, search, and manage entities and relationships visually
+
+### Native MCP Client
+
+PennyClaw includes a built-in [Model Context Protocol](https://modelcontextprotocol.io/) (MCP) client, allowing it to connect to any MCP-compatible server and use its tools. This gives PennyClaw instant access to hundreds of community-built integrations.
+
+- **Stdio transport** — Launch MCP servers as subprocesses (e.g., `npx @modelcontextprotocol/server-filesystem`)
+- **SSE transport** — Connect to remote MCP servers via HTTP Server-Sent Events
+- **Auto-reconnect** — Server configurations are persisted and reconnected on restart
+- **Web UI panel** — Add, manage, and monitor MCP server connections visually
+- **Zero dependencies** — Pure Go JSON-RPC 2.0 implementation
 
 ### Automation
 
@@ -193,10 +223,12 @@ graph TD
         LLM["LLM Gateway<br/>OpenAI / Anthropic / Gemini / OpenRouter"]
         SKILLS["Skills Registry<br/>shell / files / web / tasks / notes / email"]
         SKILLPACK["Skill Packs<br/>YAML/JSON bundles"]
+        KG["Knowledge Graph<br/>Ebbinghaus memory decay"]
+        MCP["MCP Client<br/>stdio + SSE transports"]
     end
 
     subgraph Storage["Storage"]
-        SQLITE["SQLite<br/>conversations + memory"]
+        SQLITE["SQLite<br/>conversations + memory + knowledge"]
         TASKS["JSON<br/>task store"]
         NOTES["Markdown<br/>knowledge base"]
         WORKSPACE["Workspace<br/>persistent files"]
@@ -224,6 +256,9 @@ graph TD
     AGENT --> SQLITE
     AGENT --> WORKSPACE
     AGENT --> CRON
+    AGENT --> KG
+    AGENT --> MCP
+    KG --> SQLITE
     VALIDATE -.-> AGENT
 
     style Channels fill:#064e3b,stroke:#34d399,stroke-width:2px,color:#34d399
@@ -246,8 +281,10 @@ internal/
   config/               Config loading, env var resolution, validation
   cron/                 Cron scheduler for recurring tasks
   health/               Health checks, system metrics, Prometheus endpoint
+  knowledge/            Knowledge graph with Ebbinghaus memory decay (SQLite)
   llm/                  Multi-provider LLM gateway (OpenAI, Anthropic, Gemini)
   logging/              Structured leveled logger (JSON or human-readable)
+  mcp/                  Model Context Protocol client (stdio + SSE transports)
   memory/               SQLite-backed conversation store
   notify/               Email notifications via SMTP
   sandbox/              Linux namespace/cgroup sandboxing for tool execution
@@ -262,8 +299,8 @@ docs/                   Deploy tutorial, assets
 
 1. A message arrives via one of the channels (web UI, Telegram, or webhook).
 2. The agent saves the message to SQLite and builds a context window from conversation history.
-3. The system prompt is assembled from the base prompt plus workspace context.
-4. The LLM is called with the message history and available tools.
+3. The system prompt is assembled from the base prompt, workspace context, knowledge graph memories, and MCP tool listings.
+4. The LLM is called with the message history and available tools (including MCP tools from connected servers).
 5. If the LLM returns tool calls, the agent executes each skill and feeds results back.
 6. Steps 4-5 repeat (up to 10 iterations) until the LLM returns a text response.
 7. The response is saved to memory and returned to the channel.
@@ -438,6 +475,15 @@ config validation failed:
 | `PUT` | `/api/config` | Update configuration |
 | `POST` | `/api/webhooks` | Webhook endpoint (when enabled) |
 | `POST` | `/api/upload` | File upload |
+| `GET` | `/api/knowledge` | List knowledge graph entities |
+| `GET` | `/api/knowledge/search?q=` | Search entities by name |
+| `GET` | `/api/knowledge/stats` | Knowledge graph statistics |
+| `GET` | `/api/knowledge/:id/relations` | Get entity relationships |
+| `DELETE` | `/api/knowledge/:id` | Delete an entity |
+| `GET` | `/api/mcp` | List MCP connections and tools |
+| `POST` | `/api/mcp/connect` | Connect to an MCP server |
+| `POST` | `/api/mcp/disconnect` | Disconnect from an MCP server |
+| `GET` | `/api/mcp/tools` | List all available MCP tools |
 
 ## Security
 

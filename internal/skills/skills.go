@@ -233,13 +233,20 @@ func (r *Registry) registerBuiltins() {
 				return "", fmt.Errorf("reading search results: %w", err)
 			}
 
-			// Strip HTML tags (simple approach)
-			text := stripHTMLTags(string(body))
-			// Truncate to reasonable length
-			if len(text) > 4000 {
-				text = text[:4000] + "\n... [truncated]"
-			}
-			return text, nil
+				// Parse search results from DuckDuckGo HTML
+				text := extractSearchResults(string(body))
+				if text == "" {
+					// Fallback: strip HTML tags
+					text = stripHTMLTags(string(body))
+				}
+				// Truncate to reasonable length
+				if len(text) > 4000 {
+					text = text[:4000] + "\n... [truncated]"
+				}
+				if strings.TrimSpace(text) == "" {
+					return "No search results found. Try a different query.", nil
+				}
+				return text, nil
 		},
 	})
 
@@ -383,6 +390,74 @@ func validateExternalHost(host string) error {
 	}
 
 	return nil
+}
+
+// extractSearchResults parses DuckDuckGo HTML search results into structured text.
+func extractSearchResults(html string) string {
+	var results strings.Builder
+	resultCount := 0
+
+	// DuckDuckGo HTML results are in <div class="result"> blocks
+	// Each contains a title in <a class="result__a"> and snippet in <a class="result__snippet">
+	parts := strings.Split(html, "class=\"result__a\"")
+	for i := 1; i < len(parts) && resultCount < 10; i++ {
+		part := parts[i]
+
+		// Extract title
+		title := extractBetween(part, ">", "</a>")
+		title = stripHTMLTags(title)
+		title = strings.TrimSpace(title)
+
+		// Extract URL from href
+		hrefStart := strings.LastIndex(parts[i-1]+"class=\"result__a\"", "href=\"")
+		var link string
+		if hrefStart >= 0 {
+			remainder := (parts[i-1] + "class=\"result__a\"")[hrefStart+6:]
+			if endQuote := strings.Index(remainder, "\""); endQuote > 0 {
+				link = remainder[:endQuote]
+			}
+		}
+
+		// Extract snippet
+		var snippet string
+		if snipIdx := strings.Index(part, "result__snippet"); snipIdx >= 0 {
+			snipPart := part[snipIdx:]
+			snippet = extractBetween(snipPart, ">", "</")
+			snippet = stripHTMLTags(snippet)
+			snippet = strings.TrimSpace(snippet)
+		}
+
+		if title != "" {
+			resultCount++
+			results.WriteString(fmt.Sprintf("%d. %s\n", resultCount, title))
+			if link != "" {
+				results.WriteString(fmt.Sprintf("   URL: %s\n", link))
+			}
+			if snippet != "" {
+				results.WriteString(fmt.Sprintf("   %s\n", snippet))
+			}
+			results.WriteString("\n")
+		}
+	}
+
+	if resultCount == 0 {
+		return ""
+	}
+	return fmt.Sprintf("Search results (%d found):\n\n%s", resultCount, results.String())
+}
+
+// extractBetween returns the text between the first occurrence of start and end markers.
+func extractBetween(s, start, end string) string {
+	startIdx := strings.Index(s, start)
+	if startIdx < 0 {
+		return ""
+	}
+	s = s[startIdx+len(start):]
+	endIdx := strings.Index(s, end)
+	if endIdx < 0 {
+		return ""
+	}
+	return s[:endIdx]
 }
 
 // stripHTMLTags removes HTML tags from a string (simple regex-free approach).

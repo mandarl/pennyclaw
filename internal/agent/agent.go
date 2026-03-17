@@ -13,7 +13,9 @@ import (
 	"github.com/mandarl/pennyclaw/internal/config"
 	"github.com/mandarl/pennyclaw/internal/cron"
 	"github.com/mandarl/pennyclaw/internal/health"
+	"github.com/mandarl/pennyclaw/internal/knowledge"
 	"github.com/mandarl/pennyclaw/internal/llm"
+	"github.com/mandarl/pennyclaw/internal/mcp"
 	"github.com/mandarl/pennyclaw/internal/memory"
 	"github.com/mandarl/pennyclaw/internal/notify"
 	"github.com/mandarl/pennyclaw/internal/sandbox"
@@ -38,6 +40,8 @@ type Agent struct {
 	health    *health.Checker
 	taskStore *skills.TaskStore
 	noteStore *skills.NoteStore
+	graph     *knowledge.Graph
+	mcpMgr    *mcp.Manager
 	// supportsTools indicates whether the LLM provider supports tool/function calling.
 	supportsTools bool
 }
@@ -104,6 +108,19 @@ func New(cfg *config.Config, dataDir string) (*Agent, error) {
 	// Register productivity skills (tasks, notes)
 	ts, ns := skills.RegisterProductivitySkills(skillRegistry, dataDir)
 
+	// Initialize knowledge graph
+	kg, err := knowledge.NewGraph(mem.DB())
+	if err != nil {
+		log.Printf("Warning: failed to initialize knowledge graph: %v", err)
+	}
+	if kg != nil {
+		log.Printf("Knowledge graph initialized")
+	}
+
+	// Initialize MCP manager
+	mcpManager := mcp.NewManager(dataDir)
+	log.Printf("MCP client manager initialized")
+
 	// Initialize health checker
 	hc := health.NewChecker(Version, provider.Name(), cfg.LLM.Model, len(skillRegistry.AsTools()))
 
@@ -118,6 +135,8 @@ func New(cfg *config.Config, dataDir string) (*Agent, error) {
 		health:        hc,
 		taskStore:     ts,
 		noteStore:     ns,
+		graph:         kg,
+		mcpMgr:        mcpManager,
 		supportsTools: supportsTools,
 	}
 
@@ -151,6 +170,28 @@ func New(cfg *config.Config, dataDir string) (*Agent, error) {
 
 	// Register cron skills
 	agent.registerCronSkills()
+
+	// Register knowledge graph skills
+	agent.registerKnowledgeSkills()
+
+	// Register MCP skills
+	agent.registerMCPSkills()
+
+	// Auto-connect configured MCP servers
+	go func() {
+		configs, err := mcpManager.LoadConfigs()
+		if err != nil {
+			log.Printf("Warning: failed to load MCP configs: %v", err)
+			return
+		}
+		for _, cfg := range configs {
+			if cfg.Enabled {
+				if err := mcpManager.Connect(context.Background(), cfg); err != nil {
+					log.Printf("Warning: failed to connect MCP server %s: %v", cfg.Name, err)
+				}
+			}
+		}
+	}()
 
 	// Update skill count now that all skills are registered
 	hc.UpdateSkillCount(len(skillRegistry.AsTools()))
@@ -443,12 +484,26 @@ func (a *Agent) handleMessage(ctx context.Context, sessionID, userMessage, chann
 
 		// If no tool calls, return the text response
 		if len(resp.ToolCalls) == 0 {
+			content := resp.Content
+			// Guard against empty responses — the LLM sometimes returns
+			// empty content when it's unsure how to proceed
+			if content == "" {
+				if i > 0 {
+					// We executed tools but got no summary — ask the LLM to summarize
+					messages = append(messages, llm.Message{
+						Role:    "user",
+						Content: "Please summarize what you just did and provide a helpful response to the user.",
+					})
+					continue
+				}
+				content = "I'm not sure how to help with that. Could you rephrase your request?"
+			}
 			// Save assistant response
-			if err := a.memory.SaveMessage(sessionID, "assistant", resp.Content, channel); err != nil {
+			if err := a.memory.SaveMessage(sessionID, "assistant", content, channel); err != nil {
 				log.Printf("Warning: failed to save response: %v", err)
 			}
 			a.health.RecordRequest(time.Since(start), nil)
-			return resp.Content, nil
+			return content, nil
 		}
 
 		// Execute tool calls
@@ -516,6 +571,22 @@ func (a *Agent) buildSystemPrompt() string {
 		prompt += "\n\n" + skillpackContext
 	}
 
+	// Add knowledge graph context
+	if a.graph != nil {
+		kgContext := a.graph.GetContext(20)
+		if kgContext != "" {
+			prompt += "\n\n--- Knowledge Graph (things I remember) ---\n" + kgContext
+		}
+	}
+
+	// Add MCP tools context
+	if a.mcpMgr != nil {
+		mcpTools := a.mcpMgr.Tools()
+		if len(mcpTools) > 0 {
+			prompt += fmt.Sprintf("\n\n--- MCP Tools (%d available from external servers) ---", len(mcpTools))
+		}
+	}
+
 	return prompt
 }
 
@@ -562,6 +633,16 @@ func (a *Agent) TaskStore() *skills.TaskStore {
 // NoteStore returns the agent's note store.
 func (a *Agent) NoteStore() *skills.NoteStore {
 	return a.noteStore
+}
+
+// Graph returns the agent's knowledge graph.
+func (a *Agent) Graph() *knowledge.Graph {
+	return a.graph
+}
+
+// MCPManager returns the agent's MCP connection manager.
+func (a *Agent) MCPManager() *mcp.Manager {
+	return a.mcpMgr
 }
 
 // HealthCheck returns the agent's health status.
