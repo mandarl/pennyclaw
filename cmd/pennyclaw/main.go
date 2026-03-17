@@ -12,7 +12,9 @@ import (
 	"syscall"
 
 	"github.com/mandarl/pennyclaw/internal/agent"
+	"github.com/mandarl/pennyclaw/internal/channels/telegram"
 	"github.com/mandarl/pennyclaw/internal/channels/web"
+	"github.com/mandarl/pennyclaw/internal/channels/webhook"
 	"github.com/mandarl/pennyclaw/internal/config"
 )
 
@@ -74,9 +76,18 @@ func main() {
 		log.Fatalf("Failed to initialize agent: %v", err)
 	}
 
+	// Create webhook handler (used by web server if enabled)
+	var webhookHandler *webhook.Handler
+	if cfg.Channels.Webhook.Enabled {
+		webhookHandler = webhook.New(webhook.Config{
+			Secret: cfg.Channels.Webhook.Secret,
+		}, ag.HandleMessage)
+		log.Println("Webhook endpoint enabled at /api/webhooks")
+	}
+
 	// Start web server
 	srv := web.NewServer(cfg.Server.Host, cfg.Server.Port, ag.HandleMessage, cfg, *configPath,
-		ag.Memory(), version, ag.Workspace(), ag.Scheduler(), ag.SkillPack())
+		ag.Memory(), version, ag.Workspace(), ag.Scheduler(), ag.SkillPack(), webhookHandler)
 	go func() {
 		log.Printf("PennyClaw %s starting on %s:%d", version, cfg.Server.Host, cfg.Server.Port)
 		if err := srv.Start(); err != nil {
@@ -84,12 +95,30 @@ func main() {
 		}
 	}()
 
+	// Start Telegram bot if configured
+	var tgBot *telegram.Bot
+	if cfg.Channels.Telegram.Enabled && cfg.Channels.Telegram.Token != "" {
+		tgBot, err = telegram.New(telegram.Config{
+			Token: cfg.Channels.Telegram.Token,
+		}, ag.HandleMessage)
+		if err != nil {
+			log.Printf("Warning: failed to create Telegram bot: %v", err)
+		} else {
+			if err := tgBot.Start(); err != nil {
+				log.Printf("Warning: failed to start Telegram bot: %v", err)
+			}
+		}
+	}
+
 	// Graceful shutdown
 	sigCh := make(chan os.Signal, 1)
 	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
 	<-sigCh
 
 	log.Println("Shutting down PennyClaw...")
+	if tgBot != nil {
+		tgBot.Stop()
+	}
 	ag.Stop()
 	srv.Stop()
 	log.Println("Goodbye!")

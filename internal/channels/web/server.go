@@ -19,6 +19,7 @@ import (
 	"strconv"
 
 	"github.com/creativeprojects/go-selfupdate"
+	"github.com/mandarl/pennyclaw/internal/channels/webhook"
 	"github.com/mandarl/pennyclaw/internal/config"
 	"github.com/mandarl/pennyclaw/internal/cron"
 	"github.com/mandarl/pennyclaw/internal/memory"
@@ -126,6 +127,7 @@ type Server struct {
 	workspace  *workspace.Workspace
 	scheduler  *cron.Scheduler
 	skillpack  *skillpack.Loader
+	webhook    *webhook.Handler
 }
 
 // rateLimiter implements a simple per-IP token bucket rate limiter.
@@ -174,7 +176,7 @@ func (s *Server) logf(level, format string, args ...interface{}) {
 }
 
 // NewServer creates a new web UI server.
-func NewServer(host string, port int, handler MessageHandler, cfg *config.Config, cfgPath string, mem *memory.Store, version string, ws *workspace.Workspace, sched *cron.Scheduler, sp *skillpack.Loader) *Server {
+func NewServer(host string, port int, handler MessageHandler, cfg *config.Config, cfgPath string, mem *memory.Store, version string, ws *workspace.Workspace, sched *cron.Scheduler, sp *skillpack.Loader, wh *webhook.Handler) *Server {
 	s := &Server{
 		host:      host,
 		port:      port,
@@ -189,6 +191,7 @@ func NewServer(host string, port int, handler MessageHandler, cfg *config.Config
 		workspace: ws,
 		scheduler: sched,
 		skillpack: sp,
+		webhook:   wh,
 	}
 
 	// Set up upload directory
@@ -236,6 +239,12 @@ func (s *Server) Start() error {
 	// Cron endpoints
 	mux.HandleFunc("/api/cron", s.handleCronJobs)
 	mux.HandleFunc("/api/cron/", s.handleCronJobByID)
+
+	// Webhook endpoint
+	if s.webhook != nil {
+		mux.HandleFunc("/api/webhooks", s.handleWebhook)
+		mux.HandleFunc("/api/webhooks/", s.handleWebhook)
+	}
 
 	// Skillpack endpoints
 	mux.HandleFunc("/api/skills", s.handleSkillsList)
@@ -1219,6 +1228,19 @@ func extractToken(r *http.Request) string {
 		return strings.TrimPrefix(auth, "Bearer ")
 	}
 	return r.URL.Query().Get("token")
+}
+
+// --- Webhook handler ---
+
+func (s *Server) handleWebhook(w http.ResponseWriter, r *http.Request) {
+	// Webhook endpoint uses its own auth (HMAC signature), not the bearer token.
+	// But we still require the auth token if no webhook secret is configured.
+	if s.webhook == nil {
+		http.Error(w, "Webhooks not enabled", http.StatusNotFound)
+		return
+	}
+	s.logf("INFO", "Webhook received from %s", r.RemoteAddr)
+	s.webhook.ServeHTTP(w, r)
 }
 
 func truncateLog(s string, maxLen int) string {

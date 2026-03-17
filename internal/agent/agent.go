@@ -14,6 +14,7 @@ import (
 	"github.com/mandarl/pennyclaw/internal/cron"
 	"github.com/mandarl/pennyclaw/internal/llm"
 	"github.com/mandarl/pennyclaw/internal/memory"
+	"github.com/mandarl/pennyclaw/internal/notify"
 	"github.com/mandarl/pennyclaw/internal/sandbox"
 	"github.com/mandarl/pennyclaw/internal/skillpack"
 	"github.com/mandarl/pennyclaw/internal/skills"
@@ -109,6 +110,24 @@ func New(cfg *config.Config, dataDir string) (*Agent, error) {
 
 	// Register workspace skills
 	agent.registerWorkspaceSkills()
+
+	// Register productivity skills (tasks, notes)
+	skills.RegisterProductivitySkills(skillRegistry, dataDir)
+
+	// Register email skill if configured
+	var emailNotifier *notify.EmailNotifier
+	if cfg.Email.Enabled {
+		emailNotifier = notify.NewEmailNotifier(notify.EmailConfig{
+			SMTPHost:    cfg.Email.SMTPHost,
+			SMTPPort:    cfg.Email.SMTPPort,
+			Username:    cfg.Email.Username,
+			Password:    cfg.Email.Password,
+			FromAddress: cfg.Email.FromAddress,
+			FromName:    cfg.Email.FromName,
+		})
+		skills.RegisterEmailSkill(skillRegistry, emailNotifier)
+		log.Printf("Email notifications enabled (SMTP: %s)", cfg.Email.SMTPHost)
+	}
 
 	// Initialize cron scheduler (uses same SQLite DB)
 	scheduler, err := cron.NewScheduler(mem.DB(), agent.HandleMessage)

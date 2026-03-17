@@ -25,6 +25,9 @@ type Config struct {
 	// Sandbox settings
 	Sandbox SandboxConfig `json:"sandbox"`
 
+	// Email notification settings
+	Email EmailConfig `json:"email"`
+
 	// System prompt for the agent
 	SystemPrompt string `json:"system_prompt"`
 }
@@ -54,6 +57,7 @@ type ChannelsConfig struct {
 	Web      WebChannelConfig      `json:"web"`
 	Telegram TelegramChannelConfig `json:"telegram"`
 	Discord  DiscordChannelConfig  `json:"discord"`
+	Webhook  WebhookChannelConfig  `json:"webhook"`
 }
 
 // WebChannelConfig holds web UI settings.
@@ -71,6 +75,23 @@ type TelegramChannelConfig struct {
 type DiscordChannelConfig struct {
 	Enabled bool   `json:"enabled"`
 	Token   string `json:"token"`
+}
+
+// WebhookChannelConfig holds webhook endpoint settings.
+type WebhookChannelConfig struct {
+	Enabled bool   `json:"enabled"`
+	Secret  string `json:"secret"` // Optional HMAC-SHA256 secret for signature verification
+}
+
+// EmailConfig holds SMTP settings for outbound email notifications.
+type EmailConfig struct {
+	Enabled     bool   `json:"enabled"`
+	SMTPHost    string `json:"smtp_host"`
+	SMTPPort    int    `json:"smtp_port"`
+	Username    string `json:"username"`
+	Password    string `json:"password"`
+	FromAddress string `json:"from_address"`
+	FromName    string `json:"from_name"`
 }
 
 // MemoryConfig holds memory/storage settings.
@@ -111,6 +132,8 @@ func Load(path string) (*Config, error) {
 	cfg.LLM.APIKey = resolveEnvVar(cfg.LLM.APIKey)
 	cfg.Channels.Telegram.Token = resolveEnvVar(cfg.Channels.Telegram.Token)
 	cfg.Channels.Discord.Token = resolveEnvVar(cfg.Channels.Discord.Token)
+	cfg.Channels.Webhook.Secret = resolveEnvVar(cfg.Channels.Webhook.Secret)
+	cfg.Email.Password = resolveEnvVar(cfg.Email.Password)
 
 	return cfg, nil
 }
